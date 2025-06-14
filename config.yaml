@@ -1,0 +1,41 @@
+# Sample configuration for the modular algo trading framework
+
+symbols:
+  - "738561"    # RELIANCE instrument token
+  # - "2953217"   # TCS instrument token
+timeframes:
+  - "1m"
+  - "5m"
+  - "30m"
+  - "1h"
+
+feed:
+  type: "zerodha_ws"
+  api_key: "${ZERODHA_API_KEY}"
+  username: ${USERNAME}
+  password: ${PASSWORD}
+  otp_salt: ${OTP_SALT}
+
+
+
+broker:
+  type: "zerodha"
+  username: ${USERNAME}
+  password: ${PASSWORD}
+  otp_salt: ${OTP_SALT}
+  api_key: "${ZERODHA_API_KEY}"
+
+
+storage:
+  type: "parquet"
+  base_dir: "data"
+
+strategies:
+  - type: "supertrend_rsi"
+    params:
+      rsi_length: 14
+      supertrend_length: 10
+      supertrend_multiplier: 3.0
+
+dry_run: true
+max_workers: 4

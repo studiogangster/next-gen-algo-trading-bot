@@ -1,0 +1,17 @@
+ray[default]>=2.0.0
+pandas>=1.4.0
+pandas-ta>=0.3.14b0
+ta>=0.10.2
+numpy==1.24.4
+vectorbt>=0.24.3
+kiteconnect>=4.1.0
+pydantic>=1.10.0
+loguru>=0.7.0
+asyncio
+uvloop
+psycopg2-binary
+pyarrow
+streamlit
+typer[all]
+python-dotenv
+pyotp>=2.9.0
