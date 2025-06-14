@@ -1,5 +1,7 @@
 from kiteconnect import KiteTicker
 from typing import List, Callable
+
+import pytz
 from core.base import BaseFeed
 
 class ZerodhaWebSocketFeed(BaseFeed):
@@ -9,7 +11,7 @@ class ZerodhaWebSocketFeed(BaseFeed):
 
     def __init__(self, api_key: str, access_token: str):
         self.api_key = api_key
-        self.access_token = access_token,
+        self.access_token = access_token
         self.kws = None
         self.on_data_callback = None
         self.subscribed_tokens = set()
@@ -28,7 +30,7 @@ class ZerodhaWebSocketFeed(BaseFeed):
                 # Convert tick to standard format
                 print("_tick_", tick)
                 data = {
-                    "timestamp": tick.get("last_trade_time"),
+                    "timestamp": tick.get("exchange_timestamp").astimezone(pytz.utc),
                     "open": tick.get("ohlc", {}).get("open"),
                     "high": tick.get("ohlc", {}).get("high"),
                     "low": tick.get("ohlc", {}).get("low"),

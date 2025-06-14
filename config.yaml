@@ -1,7 +1,7 @@
 # Sample configuration for the modular algo trading framework
 
 symbols:
-  - "738561"    # RELIANCE instrument token
+  - "256265"    # RELIANCE instrument token
   # - "2953217"   # TCS instrument token
 timeframes:
   - "1m"
@@ -12,7 +12,7 @@ timeframes:
 feed:
   type: "zerodha_ws"
   api_key: "${ZERODHA_API_KEY}"
-  username: ${USERNAME}
+  username: ${USERID}
   password: ${PASSWORD}
   otp_salt: ${OTP_SALT}
 
@@ -20,7 +20,7 @@ feed:
 
 broker:
   type: "zerodha"
-  username: ${USERNAME}
+  username: ${USERID}
   password: ${PASSWORD}
   otp_salt: ${OTP_SALT}
   api_key: "${ZERODHA_API_KEY}"

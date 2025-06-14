@@ -10,6 +10,8 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, days=5):
     Returns a DataFrame with columns: timestamp, open, high, low, close, volume
     """
     kite = ZerodhaBroker(enctoken=enctoken)
+    # profile_details = kite.profile()
+    # print("profile_details", profile_details)
 
     # Map timeframe to Zerodha interval
     interval_map = {

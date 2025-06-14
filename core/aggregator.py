@@ -34,8 +34,7 @@ class TimeframeAggregator(BaseTimeframeAggregator):
         required = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
         candles = candles[required].copy()
 
-        candles['timestamp'] = pd.to_datetime(candles['timestamp']).dt.tz_convert('UTC')
-
+        candles['timestamp'] = pd.to_datetime(candles['timestamp'])#.dt.tz_convert('Asia/Kolkata')
         candles = candles.drop_duplicates(subset=['timestamp'], keep='last')
         candles = candles.sort_values('timestamp')
         # Store as if it was 1m data for aggregation
@@ -55,7 +54,7 @@ class TimeframeAggregator(BaseTimeframeAggregator):
         # Assume tick is a dict with keys: 'timestamp', 'open', 'high', 'low', 'close', 'volume'
         df = self.data.setdefault(symbol, pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']))
         tick_df = pd.DataFrame([tick])
-        tick_df['timestamp'] = pd.to_datetime(tick_df['timestamp']).dt.tz_localize('Asia/Kolkata').dt.tz_convert('UTC')
+        tick_df['timestamp'] = pd.to_datetime(tick_df['timestamp']) # .dt.tz_localize('Asia/Kolkata') # .dt.tz_convert('UTC')
 
         df = pd.concat([df, tick_df], ignore_index=True)
         df = df.drop_duplicates(subset=['timestamp'], keep='last')
@@ -63,6 +62,16 @@ class TimeframeAggregator(BaseTimeframeAggregator):
         df = df[df['timestamp'].notna()]
         df = df.sort_values('timestamp')
         self.data[symbol] = df
+
+        # Persist to parquet for dashboard visualization
+        try:
+            import os
+            out_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"aggregator_{symbol}.parquet")
+            df.to_parquet(out_path, index=False)
+        except Exception as e:
+            print(f"[Aggregator] Failed to write parquet for {symbol}: {e}")
 
         # Invalidate cache for this symbol
         self.agg_cache[symbol] = {}

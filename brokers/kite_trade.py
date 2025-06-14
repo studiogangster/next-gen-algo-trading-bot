@@ -77,9 +77,15 @@ class ZerodhaBroker:
                   "interval": interval,
                   "continuous": 1 if continuous else 0,
                   "oi": 1 if oi else 0}
+        
+        profile_details = self.profile()
+        print("profile_details_", instrument_token, interval)
         lst = self.session.get(
             f"{self.root_url}/instruments/historical/{instrument_token}/{interval}", params=params,
-            headers=self.headers).json()["data"]["candles"]
+            headers=self.headers)
+        
+        print("status_code", lst.status_code, lst.content)
+        lst = lst.json()["data"]["candles"]
         records = []
         for i in lst:
             record = {"date": dateutil.parser.parse(i[0]), "open": i[1], "high": i[2], "low": i[3],
