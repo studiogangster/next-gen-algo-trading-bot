@@ -33,7 +33,9 @@ class TimeframeAggregator(BaseTimeframeAggregator):
         # Ensure columns: timestamp, open, high, low, close, volume
         required = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
         candles = candles[required].copy()
-        candles['timestamp'] = pd.to_datetime(candles['timestamp'])
+
+        candles['timestamp'] = pd.to_datetime(candles['timestamp']).dt.tz_convert('UTC')
+
         candles = candles.drop_duplicates(subset=['timestamp'], keep='last')
         candles = candles.sort_values('timestamp')
         # Store as if it was 1m data for aggregation
@@ -53,9 +55,12 @@ class TimeframeAggregator(BaseTimeframeAggregator):
         # Assume tick is a dict with keys: 'timestamp', 'open', 'high', 'low', 'close', 'volume'
         df = self.data.setdefault(symbol, pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']))
         tick_df = pd.DataFrame([tick])
-        tick_df['timestamp'] = pd.to_datetime(tick_df['timestamp'])
+        tick_df['timestamp'] = pd.to_datetime(tick_df['timestamp']).dt.tz_localize('Asia/Kolkata').dt.tz_convert('UTC')
+
         df = pd.concat([df, tick_df], ignore_index=True)
         df = df.drop_duplicates(subset=['timestamp'], keep='last')
+        # Drop rows with missing or invalid timestamp before sorting
+        df = df[df['timestamp'].notna()]
         df = df.sort_values('timestamp')
         self.data[symbol] = df
 

@@ -142,4 +142,7 @@ class ZerodhaBroker:
                                        data={"parent_order_id": parent_order_id} if parent_order_id else {},
                                        headers=self.headers).json()["data"]["order_id"]
         return order_id
-    
+
+    def close(self):
+        # No-op for compatibility with BaseBroker interface
+        pass
