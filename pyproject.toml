@@ -29,6 +29,9 @@ dependencies = [
 [tool.uv]
 package = false
 
+[tool.uv.workspace]
+members = ["tradingview_dashboard/backend"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["cli", "core", "feeds", "brokers", "storage", "dashboard", "strategies", "config"]
