@@ -103,7 +103,7 @@ def start(config_path: str = typer.Option("config/config.yaml", help="Path to co
             enctoken=enctoken,
             symbol=symbol,
             timeframe=timeframe,
-            days=5
+            interval_days=60
         )
     aggregator = TimeframeAggregator(
         settings.timeframes,

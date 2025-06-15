@@ -1,0 +1,27 @@
+version: '3'
+services:
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+
+  redis-insight:
+    image: redis/redisinsight:latest
+    restart: always
+    ports:
+      - "5540:5540"
+    volumes:
+      - redis-insight:/data
+
+  # realtime-data:
+  #   build: ./realtime-data
+  #   volumes:
+  #     - ./.data:/usr/app/scrapped_data
+  #     - ./realtime-data/main.js:/usr/app/main.js
+  #   depends_on:
+  #     - redis
+
+    
+volumes:
+  redis-insight:

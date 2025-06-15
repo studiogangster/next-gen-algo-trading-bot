@@ -21,10 +21,16 @@ class TimeframeAggregator(BaseTimeframeAggregator):
         if historical_loader and symbols:
             for symbol in symbols:
                 for tf in timeframes:
-                    candles = historical_loader(symbol, tf)
-                    if candles is not None and not candles.empty:
-                        self.load_historical(symbol, tf, candles)
-                        print(f"[Aggregator] Loaded historical for {symbol} {tf}: {len(candles)} rows")
+                    candles_gen = historical_loader(symbol, tf)
+                    if candles_gen is not None:
+                        for candles in candles_gen:
+                            if candles is not None and not candles.empty:
+                                self.load_historical(symbol, tf, candles)
+                                print(f"[Aggregator] Loaded historical for {symbol} {tf}: {len(candles)} rows")
+
+
+
+
 
     def load_historical(self, symbol: str, timeframe: str, candles: pd.DataFrame) -> None:
         """
