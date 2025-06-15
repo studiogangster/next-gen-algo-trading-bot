@@ -68,8 +68,8 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
             fetch_ranges.append((fetch_start, fetch_end))
 
     print(f"[fetch_zerodha_historical] Will fetch {len(fetch_ranges)} missing range(s):")
-    for i, (start, end) in enumerate(fetch_ranges):
-        print(f"  Range {i+1}: {start} to {end}")
+    # for i, (start, end) in enumerate(fetch_ranges):
+    #     print(f"  Range {i+1}: {start} to {end}")
 
     # If Redis fully covers the range, nothing to fetch
     if not fetch_ranges:
@@ -103,7 +103,15 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
                     if isinstance(ts, str):
                         ts = pd.to_datetime(ts)
                     epoch = int(ts.timestamp())
-                    value = f"{row.timestamp},{row.open},{row.high},{row.low},{row.close},{row.volume}"
+                    # value = f"{row.timestamp},{row.open},{row.high},{row.low},{row.close},{row.volume}"
+                    value = (
+                        f"{row.timestamp},"
+                        f"{float(row.open):.2f},"
+                        f"{float(row.high):.2f},"
+                        f"{float(row.low):.2f},"
+                        f"{float(row.close):.2f}"
+                        # f"{float(row.volume):.0f}"
+                    )
                     epochs.append(epoch)
                     values.append((epoch, value))
 

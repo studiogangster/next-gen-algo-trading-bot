@@ -4,7 +4,7 @@ import TradingViewChart from './components/TradingViewChart.vue'
 
 // Example chart configs (can be made dynamic)
 const availableSymbols = ['NIFTY', 'BANKNIFTY', 'RELIANCE']
-const availableTimeframes = ['1m', '5m', '15m', '1h', '1d']
+const availableTimeframes = ['1m', '5m', '30m', '15m', '1h', 'day']
 
 const charts = ref([
   { id: 1, symbol: 'NIFTY', timeframe: '1m', data: [] },
@@ -32,7 +32,7 @@ const symbolToToken = {
   RELIANCE: 738561
 }
 
-async function fetchChartData(symbol, timeframe, start = null, end = null, limit = 100) {
+async function fetchChartData(symbol, timeframe, start = null, end = null, limit = 5) {
   const instrument_token = symbolToToken[symbol]
   if (!instrument_token) return []
 
@@ -62,9 +62,11 @@ async function fetchChartData(symbol, timeframe, start = null, end = null, limit
       console.error('Failed to fetch latest candle', e)
       return []
     }
+    _end = -1
   }
   if (!_start) {
-    _start = _end - tfSeconds * limit
+    // _start = _end - tfSeconds * limit;
+    _start = -1;
   }
 
   const url = `/candles?instrument_token=${instrument_token}&timeframe=${timeframe}&start=${_start}&end=${_end}&limit=${limit}`
@@ -99,7 +101,7 @@ async function loadAllChartData() {
 }
 
 // Fetch older candles for pagination (prepend to chart)
-async function fetchOlderCandles(chart, count = 100) {
+async function fetchOlderCandles(chart, count = 1000) {
   if (!chart.oldestEpoch) return
   const tfSeconds = {
     '1m': 60,
@@ -113,7 +115,7 @@ async function fetchOlderCandles(chart, count = 100) {
   let found = false
   let oldestEpoch = chart.oldestEpoch
   // Increase skip window to 5x count per retry to jump over large gaps
-  const skipMultiplier = 5
+  const skipMultiplier = 1
   const maxAttempts = 20
 
   while (attempts < maxAttempts && !found && oldestEpoch > 0) {
@@ -210,8 +212,8 @@ header {
   border: 1px solid #e0e0e0;
   border-radius: 10px;
   padding: 1rem;
-  min-width: 350px;
-  max-width: 420px;
+  /* min-width: 350px; */
+  /* max-width: 420px; */
   box-shadow: 0 2px 8px rgba(0,0,0,0.04);
   display: flex;
   flex-direction: column;

@@ -48,7 +48,7 @@ class Settings(BaseModel):
 
     @validator("timeframes", pre=True)
     def validate_timeframes(cls, v):
-        allowed = {"1m", "5m", "30m", "1h"}
+        allowed = {"1m", "5m", "30m", "1h", "day"}
         for tf in v:
             if tf not in allowed:
                 raise ValueError(f"Unsupported timeframe: {tf}")

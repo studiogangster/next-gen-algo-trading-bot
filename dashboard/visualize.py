@@ -9,7 +9,7 @@ st.title("Real-Time Aggregator Visualization")
 
 # --- User Inputs ---
 symbol = st.text_input("Symbol", value="256265")
-timeframe = st.selectbox("Timeframe", options=["1m", "5m", "15m", "30m", "1h"], index=0)
+timeframe = st.selectbox("Timeframe", options=["1m", "5m", "15m", "30m", "1h", "day"], index=0)
 
 st.info(
     "This dashboard visualizes real-time candles for the selected symbol and timeframe. "

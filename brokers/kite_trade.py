@@ -1,4 +1,6 @@
 import os
+
+from urllib3 import Retry
 try:
     import requests
 except ImportError:
@@ -11,7 +13,7 @@ except ImportError:
 
 import requests
 import dateutil.parser
-
+from requests.adapters import HTTPAdapter
 
 
 
@@ -50,9 +52,23 @@ class ZerodhaBroker:
     EXCHANGE_MCX = "MCX"
 
     def __init__(self, enctoken):
+        
+        # Define your retry strategy
+        retry_strategy = Retry(
+            total=5,                              # total number of retries
+            status_forcelist=[429, 500, 502, 503, 504],  # retry on these HTTP status codes
+            backoff_factor=1,                     # exponential backoff: 1s, 2s, 4s, etc.
+            raise_on_status=False,                # don't raise exceptions for retriable status codes
+        )
+
+        # Mount the retry strategy to the session
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        
         self.enctoken = enctoken
         self.headers = {"Authorization": f"enctoken {self.enctoken}"}
         self.session = requests.session()
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
         self.root_url = "https://kite.zerodha.com/oms"
         self.session.get(self.root_url, headers=self.headers)
 
@@ -83,6 +99,7 @@ class ZerodhaBroker:
             f"{self.root_url}/instruments/historical/{instrument_token}/{interval}", params=params,
             headers=self.headers)
         
+
 
         lst = lst.json()["data"]["candles"]
         records = []

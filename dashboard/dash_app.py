@@ -7,7 +7,7 @@ import plotly.graph_objs as go
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 DEFAULT_SYMBOL = "2953217"
 DEFAULT_TIMEFRAME = "1m"
-TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h"]
+TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "day"]
 
 def get_available_symbols():
     files = [f for f in os.listdir(DATA_DIR) if f.startswith("aggregator_") and f.endswith(".parquet")]
