@@ -12,6 +12,7 @@ from core.aggregator import TimeframeAggregator
 from strategies.supertrend_rsi import SupertrendRSIStrategy
 from feeds.zerodha_ws import ZerodhaWebSocketFeed
 from storage.parquet import ParquetStorage
+import time
 
 app = typer.Typer()
 
@@ -124,7 +125,6 @@ def start(config_path: str = typer.Option("config/config.yaml", help="Path to co
         max_workers=settings.max_workers,
     )
 
-    import time
 
     engine = Engine(engine_config)
     typer.echo("Starting trading engine...")

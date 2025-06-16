@@ -34,7 +34,15 @@ def ts_add(key, timestamp, value, labels=None, pipe=None):
     Add a value to a RedisTimeSeries key, using DUPLICATE_POLICY=FIRST.
     If `pipe` is provided, the command is added to the pipeline.
     """
-    # ts_create_if_not_exists(key, labels)
+    if not hasattr(ts_add, "_initialized_ts_keys"):
+        ts_add._initialized_ts_keys = set()
+        
+        
+    if key not in ts_add._initialized_ts_keys:
+        ts_create_if_not_exists(key, labels)
+        ts_add._initialized_ts_keys.add(key)
+    
+    
     client = get_redis_client()
     cmd = ["TS.ADD", key, timestamp, value]
     if pipe:

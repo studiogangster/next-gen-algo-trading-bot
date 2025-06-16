@@ -4,6 +4,43 @@ from datetime import datetime, timedelta
 
 from brokers.kite_trade import ZerodhaBroker
 from storage.redis_client import get_redis_client
+import time
+
+def sync_zerodha_historical_realtime(enctoken, symbol, timeframe, sync_interval=60, interval_days=60):
+    """
+    Periodically syncs the latest historical candles from the last known timestamp in Redis up to now.
+    Runs every `sync_interval` seconds.
+    """
+    from storage.redis_client import ts_range
+    instrument_token = int(symbol)
+    ts_field_key = f"ts:candle:{instrument_token}:{timeframe}:open"
+
+    while True:
+        # Get the latest timestamp in Redis
+        try:
+            ts_data = ts_range(ts_field_key, "-", "+")
+        except Exception as e:
+            if "TSDB: the key does not exist" in str(e):
+                ts_data = []
+            else:
+                raise
+        if ts_data:
+            redis_max = int(ts_data[-1][0])
+            from_date = datetime.fromtimestamp(redis_max)
+        else:
+            from_date = None  # Will default to previous_days in fetch_zerodha_historical
+
+        to_date = datetime.now()
+        print(f"[sync_zerodha_historical_realtime] Syncing from {from_date} to {to_date}")
+
+        # Fetch and ingest new data
+        for _ in fetch_zerodha_historical(
+            enctoken, symbol, timeframe, from_date=from_date, to_date=to_date, interval_days=interval_days
+        ):
+            pass  # fetch_zerodha_historical already ingests and prints
+
+        print(f"[sync_zerodha_historical_realtime] Sleeping for {sync_interval} seconds...")
+        time.sleep(sync_interval)
 
 def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_date=None, previous_days = 350 * 20, interval_days=60):
     """
@@ -35,11 +72,12 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
 
     from storage.redis_client import ts_add, ts_range, ts_get
 
-    ts_key = f"ts:candle:{instrument_token}:{timeframe}"
+    # Use the 'open' field timeseries for Redis coverage check
+    ts_field_key = f"ts:candle:{instrument_token}:{timeframe}:open"
 
     # Find the lowest and highest timestamp in RedisTimeSeries for the requested range
     try:
-        ts_data = ts_range(ts_key, "-", "+")
+        ts_data = ts_range(ts_field_key, "-", "+")
     except Exception as e:
         if "TSDB: the key does not exist" in str(e):
             ts_data = []
@@ -62,24 +100,41 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
     else:
         print("[fetch_zerodha_historical] Redis has no data for this key.")
 
+    # Helper: get timedelta for timeframe
+    def get_timeframe_delta(tf):
+        if tf == "1m":
+            return timedelta(minutes=1)
+        elif tf == "5m":
+            return timedelta(minutes=5)
+        elif tf == "30m":
+            return timedelta(minutes=30)
+        elif tf == "1h":
+            return timedelta(hours=1)
+        elif tf == "day":
+            return timedelta(days=1)
+        else:
+            raise ValueError(f"Unsupported timeframe: {tf}")
+
+    tf_delta = get_timeframe_delta(timeframe)
+
     # Determine which ranges to fetch from Zerodha
     fetch_ranges = []
     if redis_min is None or req_min < redis_min:
-        # Need to fetch from req_min to (redis_min - 1)
+        # Need to fetch from req_min up to (but not including) redis_min
         fetch_start = from_date
-        fetch_end = datetime.fromtimestamp(redis_min) if redis_min else to_date
-        if fetch_start < fetch_end:
+        fetch_end = datetime.fromtimestamp(redis_min) - tf_delta if redis_min else to_date
+        if fetch_start <= fetch_end:
             fetch_ranges.append((fetch_start, fetch_end))
     if redis_max is None or req_max > redis_max:
-        # Need to fetch from (redis_max + 1) to req_max
-        fetch_start = datetime.fromtimestamp(redis_max) if redis_max else from_date
+        # Need to fetch from (redis_max + 1 interval) up to req_max
+        fetch_start = datetime.fromtimestamp(redis_max) + tf_delta if redis_max else from_date
         fetch_end = to_date
-        if fetch_start < fetch_end:
+        if fetch_start <= fetch_end:
             fetch_ranges.append((fetch_start, fetch_end))
 
     print(f"[fetch_zerodha_historical] Will fetch {len(fetch_ranges)} missing range(s):")
-    # for i, (start, end) in enumerate(fetch_ranges):
-    #     print(f"  Range {i+1}: {start} to {end}")
+    for i, (start, end) in enumerate(fetch_ranges):
+        print(f"  Range {i+1}: {start} to {end}")
 
     # If Redis fully covers the range, nothing to fetch
     if not fetch_ranges:
@@ -117,19 +172,7 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
                     for field in ["open", "high", "low", "close"]:
                         ts_field_key = f"ts:candle:{instrument_token}:{timeframe}:{field}"
                         value = getattr(row, field)
-                        ts_add(ts_field_key, epoch, float(value), pipe=pipe)
-                        continue
-                        
-                        try:
-                            existing = ts_range(ts_field_key, epoch, epoch)
-                        except Exception as e:
-                            if "TSDB: the key does not exist" in str(e):
-                                existing = []
-                            else:
-                                raise
-                        if not existing:
-                            ts_add(ts_field_key, epoch, float(value))
-                
+                        ts_add(ts_field_key, epoch, float(value), pipe=pipe, labels={"type": "ohlc", "instrument_token": instrument_token, "timeframe": timeframe,"sub_type":  field }    )
                 pipe.execute()
                 print(f"[fetch_zerodha_historical] Ingested new candles into RedisTimeSeries for {current_from} to {current_to}.")
 
