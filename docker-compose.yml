@@ -1,7 +1,8 @@
 version: '3'
 services:
   redis:
-    image: redis:7-alpine
+    # Use Redis Stack for RedisTimeSeries support
+    image: redis/redis-stack-server:latest
     restart: always
     ports:
       - "6379:6379"

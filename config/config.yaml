@@ -5,10 +5,10 @@ symbols:
   # - "2953217"   # TCS instrument token
 timeframes:
   - "1m"
-  - "5m"
-  - "30m"
-  - "1h"
-  - "day"
+  # - "5m"
+  # - "30m"
+  # - "1h"
+  # - "day"
 
 feed:
   type: "zerodha_ws"

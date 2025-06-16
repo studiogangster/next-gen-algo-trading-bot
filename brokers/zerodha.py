@@ -33,14 +33,24 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
 
     instrument_token = int(symbol)
 
-    redis_client = get_redis_client()
-    redis_key = f"candle:{instrument_token}:{timeframe}"
+    from storage.redis_client import ts_add, ts_range, ts_get
 
-    # Find the lowest and highest timestamp in Redis for the requested range
-    min_score = redis_client.zrange(redis_key, 0, 0, withscores=True)
-    max_score = redis_client.zrevrange(redis_key, 0, 0, withscores=True)
-    redis_min = int(min_score[0][1]) if min_score else None
-    redis_max = int(max_score[0][1]) if max_score else None
+    ts_key = f"ts:candle:{instrument_token}:{timeframe}"
+
+    # Find the lowest and highest timestamp in RedisTimeSeries for the requested range
+    try:
+        ts_data = ts_range(ts_key, "-", "+")
+    except Exception as e:
+        if "TSDB: the key does not exist" in str(e):
+            ts_data = []
+        else:
+            raise
+    if ts_data:
+        redis_min = int(ts_data[0][0])
+        redis_max = int(ts_data[-1][0])
+    else:
+        redis_min = None
+        redis_max = None
 
     # Convert from_date and to_date to epoch
     req_min = int(from_date.timestamp())
@@ -95,47 +105,33 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
                 df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
                 print(f"[fetch_zerodha_historical] Fetched {len(df)} rows for {current_from.date()} to {current_to.date()}")
 
-                # Cache only missing candles to Redis sorted set
-                epochs = []
-                values = []
+ 
+                # Cache only missing candles to RedisTimeSeries (one series per field)
+                pipe = get_redis_client().pipeline(transaction=False)
                 for row in df.itertuples(index=False):
                     ts = row.timestamp
                     if isinstance(ts, str):
                         ts = pd.to_datetime(ts)
                     epoch = int(ts.timestamp())
-                    # value = f"{row.timestamp},{row.open},{row.high},{row.low},{row.close},{row.volume}"
-                    value = (
-                        f"{row.timestamp},"
-                        f"{float(row.open):.2f},"
-                        f"{float(row.high):.2f},"
-                        f"{float(row.low):.2f},"
-                        f"{float(row.close):.2f}"
-                        # f"{float(row.volume):.0f}"
-                    )
-                    epochs.append(epoch)
-                    values.append((epoch, value))
-
-                # Check which epochs are already present using ZMSCORE
-                existing = redis_client.zmscore(redis_key, epochs)
-                # existing is a list of scores or None for each epoch
-
-                # Prepare only missing candles for insertion
-                to_add = {}
-                for idx, score in enumerate(existing):
-                    if score is None:
-                        epoch, value = values[idx]
-                        to_add[value] = epoch
-
-                print(f"[fetch_zerodha_historical] Fetched {len(df)} candles for {current_from} to {current_to}.")
-                print(f"[fetch_zerodha_historical] {len(to_add)} new candles will be ingested into Redis.")
-
-                if to_add:
-                    pipe = redis_client.pipeline()
-                    pipe.zadd(redis_key, to_add)
-                    pipe.execute()
-                    print(f"[fetch_zerodha_historical] Ingested {len(to_add)} new candles into Redis for {current_from} to {current_to}.")
-                else:
-                    print(f"[fetch_zerodha_historical] No new candles ingested for {current_from} to {current_to} (all already present).")
+                    # Insert each field into its own time series
+                    for field in ["open", "high", "low", "close"]:
+                        ts_field_key = f"ts:candle:{instrument_token}:{timeframe}:{field}"
+                        value = getattr(row, field)
+                        ts_add(ts_field_key, epoch, float(value), pipe=pipe)
+                        continue
+                        
+                        try:
+                            existing = ts_range(ts_field_key, epoch, epoch)
+                        except Exception as e:
+                            if "TSDB: the key does not exist" in str(e):
+                                existing = []
+                            else:
+                                raise
+                        if not existing:
+                            ts_add(ts_field_key, epoch, float(value))
+                
+                pipe.execute()
+                print(f"[fetch_zerodha_historical] Ingested new candles into RedisTimeSeries for {current_from} to {current_to}.")
 
                 yield df
             else:

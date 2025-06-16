@@ -1,16 +1,9 @@
-from fastapi import FastAPI, Query
-from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Query
+from typing import Dict, List, Optional
 from datetime import datetime
-import redis
-import os
+from storage.redis_client import get_redis_client, ts_range
 
 app = FastAPI()
-
-
-def get_redis_client():
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    return redis.Redis.from_url(redis_url, decode_responses=True)
-
 
 @app.get("/candles")
 def get_candles(
@@ -21,75 +14,99 @@ def get_candles(
     limit: int = Query(1000, description="Max number of candles to return")
 ):
     """
-    Fetch candle data for a given instrument and timeframe from Redis.
+    Fetch OHLC candles from RedisTimeSeries for a given instrument and timeframe.
     """
-    # timeframe = "1m"
-    redis_client = get_redis_client()
-    redis_key = f"candle:{instrument_token}:{timeframe}"
-    # ZRANGEBYSCORE returns values in [min, max]
-    if end == -1:
-        candles = redis_client.zrevrange(
-        redis_key,
-        start=0,
-        end=limit,
-        withscores=True
-                                        #  end='+inf'
-                                            #  max=end,
-                                            # min='-inf',
-                                            #  start=0,
-                                            # num=limit,
-                                            #  withscores=True
-                                            
-                                            )
-    else:
-        candles = redis_client.zrevrangebyscore(
-        redis_key,
-        max=end,
-        min='-inf',
-        start=0,
-        num=limit,
-        withscores=True
-        )
-    result = []
-    print("candles", candles[:-2])
-    for value, score in candles:
-        # value is CSV: timestamp,open,high,low,close,volume
-        parts = value.split(",")
-        if len(parts) == 5:
-            result.append({
-                "timestamp": parts[0],
-                "open": float(parts[1]),
-                "high": float(parts[2]),
-                "low": float(parts[3]),
-                "close": float(parts[4]),
-                # "volume": float(parts[5]),
-                "epoch": int(score)
-            })
-    
-    result = list(reversed(result))
+    fields = ["open", "high", "low", "close"]
+    base_key = f"ts:candle:{instrument_token}:{timeframe}"
+
+    from_ts = str(start) if start >= 0 else "-"
+    to_ts = str(end) if end >= 0 else "+"
+
+    # Fetch all field data
+    field_data: Dict[str, Dict[int, float]] = {}
+
+    for field in fields:
+        key = f"{base_key}:{field}"
+        try:
+            data = ts_range(key, from_ts, to_ts)
+            field_data[field] = {int(ts): float(val) for ts, val in data}
+        except Exception as e:
+            if "TSDB: the key does not exist" in str(e):
+                field_data[field] = {}
+            else:
+                raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
+
+    # Intersect timestamps that exist in all fields (ensure complete candles)
+    common_ts = set.intersection(*(set(fd.keys()) for fd in field_data.values()))
+    sorted_ts = sorted(common_ts)[-limit:] if limit > 0 else sorted(common_ts)
+
+    result = [
+        {
+            "timestamp": ts,
+            "open": field_data["open"][ts],
+            "high": field_data["high"][ts],
+            "low": field_data["low"][ts],
+            "close": field_data["close"][ts],
+            "epoch": ts,
+        }
+        for ts in sorted_ts
+    ]
+
     return {"candles": result}
 
 
 @app.get("/candles/latest")
-def get_latest_candle(
-    instrument_token: int,
-    timeframe: str
-):
+def get_latest_common_timestamp(instrument_token: int, timeframe: str):
     """
-    Get the latest available candle timestamp for a given instrument and timeframe.
+    Get the latest common timestamp across all OHLC series for an instrument and timeframe.
     """
-    timeframe = "1m"
-    redis_client = get_redis_client()
-    redis_key = f"candle:{instrument_token}:{timeframe}"
-    latest = redis_client.zrevrange(redis_key, 0, 0, withscores=True)
-    if latest:
-        value, score = latest[0]
-        return {
-            "timestamp": value.split(",")[0],
-            "epoch": int(score)
-        }
+    fields = ["open", "high", "low", "close"]
+    base_key = f"ts:candle:{instrument_token}:{timeframe}"
+    keys = {field: f"{base_key}:{field}" for field in fields}
+
+    client = get_redis_client()
+    timestamps = []
+
+    for field, key in keys.items():
+        try:
+            val = client.execute_command("TS.GET", key)
+            if val:
+                timestamps.append(int(val[0]))
+        except Exception:
+            # One of the fields might not exist
+            return {"timestamp": None}
+
+    if len(timestamps) < 4:
+        return {"timestamp": None}
+
+    # Return the latest timestamp that is common to all series
+    if all(ts == timestamps[0] for ts in timestamps):
+        return {"timestamp": timestamps[0] , "epoch" : timestamps[0]}
     else:
-        return {
-            "timestamp": None,
-            "epoch": None
-        }
+        return {"timestamp": None}
+    """
+    Get the latest available candle (OHLC) for a given instrument and timeframe from RedisTimeSeries.
+    """
+    base_key = f"ts:candle:{instrument_token}:{timeframe}"
+    fields = ["open", "high", "low", "close"]
+    keys = {field: f"{base_key}:{field}" for field in fields}
+
+    try:
+        open_data = ts_range(keys["open"], "-", "+")
+        if not open_data:
+            return {"timestamp": None, "epoch": None}
+        latest_ts = int(open_data[-1][0])
+    except Exception as e:
+        if "TSDB: the key does not exist" in str(e):
+            return {"timestamp": None, "epoch": None}
+        raise
+
+    result = {"timestamp": latest_ts, "epoch": latest_ts}
+    for field in fields:
+        try:
+            val = ts_range(keys[field], latest_ts, latest_ts)
+            result[field] = float(val[0][1]) if val else None
+        except Exception:
+            result[field] = None
+
+    return result
