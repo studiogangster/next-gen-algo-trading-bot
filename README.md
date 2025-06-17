@@ -1,4 +1,4 @@
-# NSEQuantAI
+# next-gen-trading-engine
 
 A full-stack trading dashboard for live and historical market data visualization, featuring a Vue.js frontend with real-time charting and a Python backend with Zerodha integration and Redis storage.
 
