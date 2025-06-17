@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 from brokers.zerodha import sync_zerodha_historical_realtime
 from config.settings import FeedConfig, Settings
 from core.engine import Engine, EngineConfig
-from core.aggregator import TimeframeAggregator
 from strategies.supertrend_rsi import SupertrendRSIStrategy
 from feeds.zerodha_ws import ZerodhaWebSocketFeed
 from storage.parquet import ParquetStorage
@@ -96,35 +95,6 @@ def start(config_path: str = typer.Option("config/config.yaml", help="Path to co
         else:
             raise NotImplementedError(f"Strategy {strat_cfg.type} not implemented")
 
-    # Aggregator with historical loader
-    # TODO: move to zerodha block
-    from brokers.zerodha import fetch_zerodha_historical
-    def historical_loader(symbol, timeframe):
-        # Use the same credentials as the feed
-        return fetch_zerodha_historical(
-            enctoken=enctoken,
-            symbol=symbol,
-            timeframe=timeframe,
-            interval_days=60
-        )
-    def realtime_loader(symbol, timeframe):
-        # Use the same credentials as the feed
-        return sync_zerodha_historical_realtime(
-            enctoken=enctoken,
-            symbol=symbol,
-            timeframe=timeframe,
-            sync_interval=0.5,
-            interval_days=60,
-            partition_timestamp=None
-        )
-    
-    
-    aggregator = TimeframeAggregator(
-        settings.timeframes,
-        symbols=settings.symbols,
-        historical_loader=historical_loader,
-        realtime_loader=realtime_loader
-    )
 
     # Engine config
     engine_config = EngineConfig(
@@ -132,7 +102,6 @@ def start(config_path: str = typer.Option("config/config.yaml", help="Path to co
         timeframes=settings.timeframes,
         strategies=strategies,
         feed=feed,
-        aggregator=aggregator,
         broker=broker,
         storage=storage,
         dry_run=settings.dry_run,

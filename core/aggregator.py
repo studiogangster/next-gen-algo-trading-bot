@@ -17,24 +17,30 @@ class TimeframeAggregator(BaseTimeframeAggregator):
         self.timeframes = timeframes
         self.data: Dict[str, pd.DataFrame] = {}  # symbol -> 1m candles DataFrame
         self.agg_cache: Dict[str, Dict[str, pd.DataFrame]] = {}  # symbol -> timeframe -> DataFrame
+        
+        self.symbols = symbols
+        self.historical_loader = historical_loader
+        self.realtime_loader = realtime_loader
 
         # Load historical data if loader and symbols provided
-        if  symbols:
+        
+    def start(self):
+        if  self.symbols:
             
-            if historical_loader:
-                for symbol in symbols:
-                    for tf in timeframes:
-                        candles_gen = historical_loader(symbol, tf)
+            if self.historical_loader:
+                for symbol in self.symbols:
+                    for tf in self.timeframes:
+                        candles_gen = self.historical_loader(symbol, tf)
                         if candles_gen is not None:
                             for candles in candles_gen:
                                 if candles is not None and not candles.empty:
                                     self.load_historical(symbol, tf, candles)
                                     print(f"[Aggregator] Loaded historical for {symbol} {tf}: {len(candles)} rows")
 
-            if realtime_loader:
-                for symbol in symbols:
-                    for tf in timeframes:
-                        candles_gen = realtime_loader(symbol, tf)
+            if self.realtime_loader:
+                for symbol in self.symbols:
+                    for tf in self.timeframes:
+                        candles_gen = self.realtime_loader(symbol, tf)
                         if candles_gen is not None:
                             for candles in candles_gen:
                                 if candles is not None and not candles.empty:

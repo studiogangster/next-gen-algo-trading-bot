@@ -40,6 +40,9 @@ def ts_add(key, timestamp, value, labels=None, pipe=None , upsert = False):
     args = []
     if upsert == True:
          args = ["ON_DUPLICATE", "LAST"]
+    else:
+         args = ["ON_DUPLICATE", "FIRST"]
+        
         
     if key not in ts_add._initialized_ts_keys:
         ts_create_if_not_exists(key, labels)

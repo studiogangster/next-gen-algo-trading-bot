@@ -28,6 +28,12 @@ class BaseTimeframeAggregator(ABC):
         """Add a new tick or lower timeframe bar for aggregation."""
         pass
 
+    
+    @abstractmethod
+    def start(self) -> None:
+        """Starts the worker"""
+        pass
+
     @abstractmethod
     def get_candles(self, symbol: str, timeframe: str) -> pd.DataFrame:
         """Get the current DataFrame of candles for a symbol and timeframe."""

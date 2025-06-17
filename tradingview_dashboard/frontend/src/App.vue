@@ -3,7 +3,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import TradingViewChart from './components/TradingViewChart.vue'
 
 // Example chart configs (can be made dynamic)
-const availableSymbols = ['NIFTY', 'BANKNIFTY', 'RELIANCE']
+const availableSymbols = ['NIFTY', 'BANKNIFTY', 'TCS']
 const availableTimeframes = ['1m', '5m', '30m', '15m', '1h', 'day']
 
 const charts = ref([
@@ -35,7 +35,7 @@ function removeChart(id) {
 const symbolToToken = {
   NIFTY: 256265,
   BANKNIFTY: 260105,
-  RELIANCE: 738561
+  TCS: 2953217
 }
 
 async function fetchChartData(symbol, timeframe, start = null, end = null, limit = 100) {

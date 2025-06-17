@@ -1,6 +1,9 @@
 import ray
 from typing import List, Dict, Any, Optional, Callable
 from core.base import BaseFeed, BaseTimeframeAggregator, BaseStrategy, BaseBroker, BaseStorage
+from core.aggregator import TimeframeAggregator
+from brokers.zerodha import sync_zerodha_historical_realtime, fetch_zerodha_historical
+import ray
 
 class EngineConfig:
     def __init__(
@@ -9,7 +12,6 @@ class EngineConfig:
         timeframes: List[str],
         strategies: List[BaseStrategy],
         feed: BaseFeed,
-        aggregator: BaseTimeframeAggregator,
         broker: BaseBroker,
         storage: BaseStorage,
         dry_run: bool = False,
@@ -19,7 +21,6 @@ class EngineConfig:
         self.timeframes = timeframes
         self.strategies = strategies
         self.feed = feed
-        self.aggregator = aggregator
         self.broker = broker
         self.storage = storage
         self.dry_run = dry_run
@@ -32,18 +33,60 @@ class SymbolWorker:
         symbol: str,
         timeframes: List[str],
         strategies: List[BaseStrategy],
-        aggregator: BaseTimeframeAggregator,
         broker: BaseBroker,
         storage: BaseStorage,
         dry_run: bool = False,
     ):
+        
+        print("symbol:", symbol)
+        
         self.symbol = symbol
         self.timeframes = timeframes
         self.strategies = strategies
-        self.aggregator = aggregator
         self.broker = broker
         self.storage = storage
         self.dry_run = dry_run
+        # Get Ray actor ID for logging
+        
+        # Define per-worker loader functions
+        def historical_loader(symbol, timeframe):
+            return fetch_zerodha_historical(
+                enctoken=broker.enctoken,
+                symbol=symbol,
+                timeframe=timeframe,
+                interval_days=60
+            )
+            
+        def realtime_loader(symbol, timeframe):
+            return sync_zerodha_historical_realtime(
+                enctoken=broker.enctoken,
+                symbol=symbol,
+                timeframe=timeframe,
+                sync_interval=0.5,
+                interval_days=60,
+                partition_timestamp=None
+            )
+        
+        self.historical_loader =historical_loader
+        self.realtime_loader =realtime_loader
+        
+        # self.start()
+
+        
+
+
+    def start(self):
+        self.actor_id = getattr(ray.get_runtime_context(), "get_actor_id", lambda: None)()
+        print("self.actor_id", self.actor_id)
+        # Each worker gets its own aggregator
+        self.aggregator = TimeframeAggregator(
+            self.timeframes,
+            symbols=[self.symbol],
+            historical_loader=self.historical_loader,
+            realtime_loader=self.realtime_loader
+        )
+        self.aggregator.start()
+        
 
     def on_tick(self, tick: dict):
         self.aggregator.add_tick(self.symbol, tick)
@@ -74,24 +117,41 @@ class Engine:
         self.symbol_workers = {}
 
     def start(self):
-        ray.init(ignore_reinit_error=True, num_cpus=self.config.max_workers)
+        print("Engine.start")
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=self.config.max_workers)
+        
+        
+        workers = []
+        print("self.act", self.config.symbols , self.config.max_workers)
         for symbol in self.config.symbols:
             worker = SymbolWorker.remote(
                 symbol,
                 self.config.timeframes,
                 self.config.strategies,
-                self.config.aggregator,
                 self.config.broker,
                 self.config.storage,
                 self.config.dry_run,
             )
+            workers.append(worker.start.remote())
             self.symbol_workers[symbol] = worker
+            
+            
+        # workers = [
+         
+        #  worker.start.remote() for worker in self.symbol_workers.values()   
+        # ]
+            
 
-        def on_data(symbol: str, tick: dict):
-            if symbol in self.symbol_workers:
-                self.symbol_workers[symbol].on_tick.remote(tick)
+        ray.get(workers)
+            
+            
 
-        self.config.feed.subscribe(self.config.symbols, on_data)
+        # def on_data(symbol: str, tick: dict):
+        #     if symbol in self.symbol_workers:
+        #         self.symbol_workers[symbol].on_tick.remote(tick)
+
+        # self.config.feed.subscribe(self.config.symbols, on_data)
 
     def stop(self):
         self.config.feed.close()

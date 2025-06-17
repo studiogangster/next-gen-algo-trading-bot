@@ -2,6 +2,8 @@
 import pandas as pd
 from datetime import datetime, timedelta
 
+import ray
+
 from brokers.kite_trade import ZerodhaBroker
 from storage.redis_client import get_redis_client
 import time
@@ -11,6 +13,7 @@ def sync_zerodha_historical_realtime(enctoken, symbol, timeframe, sync_interval=
     Periodically syncs the latest historical candles from the last known timestamp in Redis up to now.
     Runs every `sync_interval` seconds.
     If partition_timestamp is provided, it will be used as the starting point for fetching new data.
+    Optionally logs the Ray actor_id if provided.
     """
     from storage.redis_client import ts_range
     instrument_token = int(symbol)
@@ -54,6 +57,7 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
     """
     Yield historical candles for a symbol and timeframe from Zerodha, in chunks of interval_days.
     Each yield is a DataFrame with columns: timestamp, open, high, low, close, volume
+    Optionally logs the Ray actor_id if provided.
     """
     
     kite = ZerodhaBroker(enctoken=enctoken)
@@ -108,7 +112,7 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
     req_min = int(from_date.timestamp())
     req_max = int(to_date.timestamp())
 
-    print(f"[fetch_zerodha_historical] Requested range: {from_date} ({req_min}) to {to_date} ({req_max})")
+
     if redis_min is not None and redis_max is not None:
         print(f"[fetch_zerodha_historical] Redis covers: {datetime.fromtimestamp(redis_min)} ({redis_min}) to {datetime.fromtimestamp(redis_max)} ({redis_max})")
     else:
