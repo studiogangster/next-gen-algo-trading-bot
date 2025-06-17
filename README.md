@@ -2,6 +2,8 @@
 
 A full-stack trading dashboard for live and historical market data visualization, featuring a Vue.js frontend with real-time charting and a Python backend with Zerodha integration and Redis storage.
 
+Designed to be the core engine for AI trading bots—enabling lightning-fast execution, real-time signal generation, position management, and rapid strategy development and deployment.
+
 ---
 
 ## Features
