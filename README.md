@@ -39,7 +39,7 @@ flowchart TD
         B[Backend - FastAPI]
     end
     subgraph Data
-        R[Redis\nTimeSeries]
+        R[Redis - TimeSeries]
     end
     subgraph Compute
         RW[Ray Cluster]
@@ -51,7 +51,7 @@ flowchart TD
         Z[Zerodha API]
     end
 
-    Z -- Market Data --> B
+    Z -- Market Data --> RW
     B -- Write/Read Candles --> R
     F -- REST/WebSocket --> B
     B -- Query/Stream Data --> F
@@ -61,6 +61,7 @@ flowchart TD
     RW --> W2
     RW --> Wn
     B -- Task Dispatch --> RW
+
 ```
 
 ---
@@ -119,8 +120,8 @@ flowchart TD
 **Legend:**
 - **Frontend (Vue.js):** User interface for charts, controls, and live data.
 - **Backend (FastAPI):** Handles API requests, data ingestion, and orchestration.
-- **Redis (TimeSeries):** Stores all historical and real-time candles, supports fast queries and pub/sub.
-- **Ray Cluster:** Distributed compute for real-time indicators, signal generation, and heavy analytics.
+- **Redis (TimeSeries):** Stores all historical and real-time candles, supports fast queries and pub/sub. Both the backend and Ray workers read and write to Redis.
+- **Ray Cluster:** Distributed compute for real-time indicators, signal generation, and heavy analytics. Ray workers both read from and write results/signals to Redis.
 - **Workers:** Each Ray worker can run a strategy, indicator, or ML model in parallel. Each instrument's data fetch runs in its own worker, ensuring no rate limit or bottleneck issues.
 - **Zerodha API:** Source of live and historical market data.
 
