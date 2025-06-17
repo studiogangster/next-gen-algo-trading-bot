@@ -1,66 +1,160 @@
-# Modular Algo Trading Framework
+# TradingView Dashboard
 
-A production-ready, scalable, and extensible algorithmic trading framework built with Python 3.10+, Ray, pandas-ta, and modern best practices.
+A full-stack trading dashboard for live and historical market data visualization, featuring a Vue.js frontend with real-time charting and a Python backend with Zerodha integration and Redis storage.
+
+---
 
 ## Features
 
-- **Real-time data ingestion** from custom feeds (Zerodha WebSocket, Kafka, REST APIs)
-- **Dynamic multi-timeframe aggregation** (1m, 5m, 30m, 1h, etc.)
-- **Pluggable technical indicator engine** (pandas-ta, ta, NumPy, vectorbt)
-- **Parallel processing** of multiple symbols, timeframes, and strategies (Ray)
-- **Real-time signal execution** and broker order dispatch (Zerodha, extendable)
-- **Plugin architecture** for feeds, strategies, brokers, and storage
-- **Unified live trading & backtesting** logic
-- **Flexible storage**: PostgreSQL, TimescaleDB, or Parquet (configurable)
-- **Config & logging**: pydantic, loguru
-- **CLI** to start/stop trading per symbol/strategy
-- **Optional**: Streamlit dashboard for real-time PnL and signals
-- **Optional**: Dry-run simulation mode
+- **Live & Historical Charting**: Interactive candlestick charts with infinite scroll for historical data and real-time updates.
+- **Real-Time Polling & Upsert**: Frontend polls for the latest candles every second (configurable), upserting all of today's data to ensure accuracy and deduplication.
+- **Scroll-Back Pagination**: Load older candles by scrolling left; chart preserves your scroll position after data loads, for a seamless experience.
+- **Backend Sync**: Python backend fetches both historical and real-time data from Zerodha, stores in Redis, and serves via a fast REST API.
+- **Partitioned Data Fetching**: Backend supports a partition timestamp to precisely coordinate historical and real-time sync, avoiding overlap or gaps.
+- **Multi-Symbol, Multi-Timeframe**: Easily add/remove charts for different symbols and timeframes from the UI.
+- **Customizable Polling Interval**: Adjust how frequently the frontend polls for new data.
+- **Accurate Data Handling**: Today's candles are always upserted, so late-arriving or corrected data is reflected instantly.
+- **Responsive UI**: Built with Vue 3 and Vite for fast, modern, and mobile-friendly charting.
+- **Extensible Architecture**: Modular Python and Vue codebase, easy to extend for new brokers, strategies, or chart types.
+- **Open Source & Developer Friendly**: No vendor lock-in, easy to self-host, and well-documented for rapid onboarding.
+
+---
+
+## Why This Bot is Better Than Any Other in the Market
+
+- **True Real-Time Upsert**: Unlike most dashboards that only append new candles, this bot upserts all of today's data on every poll, ensuring you always see the most accurate and up-to-date chart—even if the broker corrects or backfills data.
+- **Scroll Position Preservation**: When you scroll back to load historical data, your view is preserved, making deep analysis and backtesting much more user-friendly.
+- **Partitioned Sync for Zero Data Loss**: The backend's partition timestamp logic ensures there are no gaps or overlaps between historical and real-time data, a common problem in other solutions.
+- **Full Transparency & Extensibility**: 100% open source, with a modular codebase. You can audit, extend, or self-host without restrictions.
+- **Multi-Symbol, Multi-Timeframe, Multi-Chart**: Instantly add or remove charts for any supported symbol or timeframe, with independent polling and pagination.
+- **Lightning Fast & Lightweight**: Uses Redis for blazing-fast data access and Vue 3 + Vite for a snappy frontend experience.
+- **Plug-and-Play for Zerodha**: Out-of-the-box support for Zerodha, with easy extension to other brokers.
+- **Developer Experience First**: Clean code, clear documentation, and a focus on making it easy for you to build, debug, and extend.
+- **No Vendor Lock-In, No Hidden Fees**: Unlike commercial charting solutions, you control your data, your infra, and your roadmap.
+
+---
+
+## Why Algorithmic Trading is Difficult on Broker Platforms
+
+- **Limited APIs & Rate Limits**: Most broker platforms restrict API access, enforce strict rate limits, and provide limited historical data, making robust backtesting and live trading hard.
+- **Latency & Delays**: Broker dashboards and APIs often introduce significant latency, which can be fatal for high-frequency or low-latency strategies.
+- **Lack of Customization**: Broker UIs are closed-source and inflexible, making it impossible to add custom indicators, strategies, or data sources.
+- **Vendor Lock-In**: Data and logic are tied to the broker's infrastructure, making migration or integration with other tools difficult.
+- **Poor Data Quality**: Many platforms do not upsert/correct historical data, leading to inaccurate backtests and live signals.
+- **No True Real-Time Sync**: Most dashboards only append new data, missing corrections or late-arriving candles.
+- **Scalability Issues**: Broker dashboards are not designed for running multiple strategies, symbols, or timeframes in parallel.
+
+---
+
+## How This Project Solves Those Challenges
+
+- **Full Data Ownership**: All data is stored in your own Redis instance, not on a broker's server. You can export, analyze, or migrate it as you wish.
+- **Ultra-Low Latency**: Direct integration with Redis and efficient polling means you get the latest data with minimal delay.
+- **Customizable & Extensible**: Add your own indicators, strategies, or even new broker integrations with minimal effort.
+- **Accurate & Reliable**: Upsert logic ensures your charts and strategies always use the most accurate, corrected data available.
+- **No Vendor Lock-In**: 100% open source and self-hosted—migrate, fork, or extend as needed.
+- **Parallel & Scalable**: Run multiple charts, symbols, and strategies in parallel, with independent polling and data streams.
+- **Modern, Lightweight Stack**: Vue 3 + Vite frontend and Python FastAPI backend are easy to deploy, scale, and maintain.
+
+---
+
+## Lightweight & Scalable by Design
+
+- **Minimal Resource Usage**: The backend is stateless and leverages Redis for fast, in-memory data access. The frontend is a single-page app built for speed.
+- **Horizontal Scalability**: Easily scale out by running multiple backend or frontend instances behind a load balancer.
+- **Cloud & Local Ready**: Deploy on your laptop, a cloud VM, or a Kubernetes cluster—no heavy dependencies or vendor lock-in.
+- **Designed for Growth**: Add more symbols, timeframes, or users without a performance hit.
+
+---
 
 ## Project Structure
 
 ```
-/feeds         # Data feed adapters (WebSocket, REST, Kafka, etc.)
-/strategies    # Trading strategies (Supertrend, RSI, etc.)
-/core          # Core engine, base classes, time aggregation, signal engine
-/brokers       # Broker adapters (Zerodha, etc.)
-/storage       # Storage backends (PostgreSQL, TimescaleDB, Parquet)
-/config        # Config models (pydantic)
-/cli           # CLI and entrypoints
-/dashboard     # (Optional) Streamlit dashboard
+.
+├── brokers/                # Zerodha and broker integration logic
+├── core/                   # Core trading/aggregation logic
+├── dashboard/              # Backend dashboard and visualization
+├── storage/                # Redis and data storage utilities
+├── strategies/             # Trading strategies
+├── tradingview_dashboard/
+│   ├── backend/            # FastAPI backend (main.py)
+│   └── frontend/           # Vue 3 + Vite frontend
+├── config/                 # Configuration files
+├── README.md               # This file
+├── docker-compose.yml      # (Optional) Docker setup
+└── ...
 ```
 
-## Quick Start
+---
 
-1. **Clone the repo**
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. **Configure your settings** in `config/`
-4. **Run the CLI**
-   ```bash
-   python -m cli.main --help
-   ```
+## Setup Instructions
 
-## Extending
+### 1. Backend (Python, FastAPI)
 
-- **Add a new feed:** Implement `BaseFeed` in `/feeds`
-- **Add a new strategy:** Implement `BaseStrategy` in `/strategies`
-- **Add a new broker:** Implement `BaseBroker` in `/brokers`
-- **Add a new storage backend:** Implement `BaseStorage` in `/storage`
+- **Install dependencies**:
+  ```bash
+  pip install -r requirements.txt
+  ```
+  Or, if using Poetry:
+  ```bash
+  poetry install
+  ```
 
-## Requirements
+- **Environment variables**:  
+  Copy `sample_env` to `.env` and fill in your Zerodha credentials and Redis config.
 
-- Python 3.10+
-- Ray
-- pandas-ta, ta, numpy, vectorbt
-- kiteconnect (for Zerodha)
-- pydantic, loguru
-- async libraries: asyncio, uvloop
-- PostgreSQL/TimescaleDB (optional)
-- Streamlit (optional)
+- **Run Redis**:  
+  Make sure Redis is running (locally or via Docker).
+
+- **Start backend**:
+  ```bash
+  uvicorn tradingview_dashboard.backend.main:app --reload
+  ```
+
+### 2. Frontend (Vue 3, Vite)
+
+- **Install dependencies**:
+  ```bash
+  cd tradingview_dashboard/frontend
+  npm install
+  ```
+
+- **Run frontend**:
+  ```bash
+  npm run dev
+  ```
+
+- The frontend will be available at [http://localhost:5173](http://localhost:5173) (default Vite port).
+
+---
+
+## Usage
+
+- Open the frontend in your browser.
+- Add charts for different symbols and timeframes.
+- Scroll left to load older candles; the chart will preserve your scroll position.
+- The right side of the chart is kept in sync with the latest data via polling (default: every 1 second).
+- Today's candles are always upserted to ensure accuracy.
+
+---
+
+## Development Notes
+
+- **Polling & Upsert**:  
+  The frontend polls for all of today's candles and upserts them, replacing any existing candles for today.
+- **Partition Timestamp**:  
+  The backend supports a `partition_timestamp` for precise coordination between historical and real-time data fetching.
+- **Preserving Scroll Position**:  
+  When loading older data, the chart maintains the user's scroll position for a seamless experience.
+
+---
+
+## Contributing
+
+Pull requests and issues are welcome! Please open an issue to discuss your ideas or report bugs.
+
+---
 
 ## License
 
-MIT
+[MIT](LICENSE) (or specify your license here)
