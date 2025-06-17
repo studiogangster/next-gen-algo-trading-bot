@@ -1,4 +1,4 @@
-# TradingView Dashboard
+# NSEQuantAI
 
 A full-stack trading dashboard for live and historical market data visualization, featuring a Vue.js frontend with real-time charting and a Python backend with Zerodha integration and Redis storage.
 
@@ -14,6 +14,7 @@ A full-stack trading dashboard for live and historical market data visualization
 - **Multi-Symbol, Multi-Timeframe**: Easily add/remove charts for different symbols and timeframes from the UI.
 - **Customizable Polling Interval**: Adjust how frequently the frontend polls for new data.
 - **Accurate Data Handling**: Today's candles are always upserted, so late-arriving or corrected data is reflected instantly.
+- **Real-Time Indicators & Signal Generation**: Compute indicators and generate trading signals in real time using the cached data in Redis.
 - **Responsive UI**: Built with Vue 3 and Vite for fast, modern, and mobile-friendly charting.
 - **Extensible Architecture**: Modular Python and Vue codebase, easy to extend for new brokers, strategies, or chart types.
 - **Open Source & Developer Friendly**: No vendor lock-in, easy to self-host, and well-documented for rapid onboarding.
@@ -55,6 +56,16 @@ A full-stack trading dashboard for live and historical market data visualization
 - **No Vendor Lock-In**: 100% open source and self-hosted—migrate, fork, or extend as needed.
 - **Parallel & Scalable**: Run multiple charts, symbols, and strategies in parallel, with independent polling and data streams.
 - **Modern, Lightweight Stack**: Vue 3 + Vite frontend and Python FastAPI backend are easy to deploy, scale, and maintain.
+
+---
+
+## Data Architecture & Real-Time Analytics
+
+- **Redis as a Mirror for All Data**: The backend maintains a complete mirror of both historical and real-time market data in Redis. Every candle, tick, and update is cached, ensuring instant access for both the frontend and any analytics or trading logic.
+- **Unified Data for Indicators & Signals**: Because all data (historical and real-time) is available in Redis, you can compute indicators (like moving averages, RSI, SuperTrend, etc.) and generate trading signals in real time, without waiting for slow API calls or risking missing data.
+- **Real-Time Signal Generator**: The architecture is designed to support real-time signal generation—run your strategies directly on the cached data, and trigger alerts or trades with minimal latency.
+- **Extensible for Custom Analytics**: Add your own indicator calculations, signal logic, or even machine learning models, all powered by the fast, unified Redis cache.
+- **Consistent Data for All Consumers**: Whether it's the chart UI, a backtest, or a live trading bot, all components read from the same, up-to-date data source.
 
 ---
 
