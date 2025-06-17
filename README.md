@@ -1,4 +1,4 @@
-# next-gen-trading-engine
+# Next Gen Trading Engine
 
 A full-stack trading dashboard for live and historical market data visualization, featuring a Vue.js frontend with real-time charting and a Python backend with Zerodha integration and Redis storage.
 
@@ -66,6 +66,56 @@ A full-stack trading dashboard for live and historical market data visualization
 - **Real-Time Signal Generator**: The architecture is designed to support real-time signal generation—run your strategies directly on the cached data, and trigger alerts or trades with minimal latency.
 - **Extensible for Custom Analytics**: Add your own indicator calculations, signal logic, or even machine learning models, all powered by the fast, unified Redis cache.
 - **Consistent Data for All Consumers**: Whether it's the chart UI, a backtest, or a live trading bot, all components read from the same, up-to-date data source.
+
+---
+
+## System Architecture
+
+<!--
+The following is a Mermaid diagram for Markdown/README rendering only.
+If you see a JSON parse error, your tool may not support Markdown diagrams.
+-->
+
+```mermaid
+flowchart TD
+    subgraph User
+        F[Frontend (Vue.js)]
+    end
+    subgraph API
+        B[Backend (FastAPI)]
+    end
+    subgraph Data
+        R[Redis<br/>(TimeSeries)]
+    end
+    subgraph Compute
+        RW[Ray Cluster]
+        W1[Worker 1]
+        W2[Worker 2]
+        Wn[Worker N]
+    end
+    subgraph Broker
+        Z[Zerodha API]
+    end
+
+    Z -- Market Data --> B
+    B -- Write/Read Candles --> R
+    F -- REST/WebSocket --> B
+    B -- Query/Stream Data --> F
+    R -- Pub/Sub, TimeSeries --> RW
+    RW -- Signal/Indicator Results --> R
+    RW --> W1
+    RW --> W2
+    RW --> Wn
+    B -- Task Dispatch --> RW
+```
+
+**Legend:**
+- **Frontend (Vue.js):** User interface for charts, controls, and live data.
+- **Backend (FastAPI):** Handles API requests, data ingestion, and orchestration.
+- **Redis (TimeSeries):** Stores all historical and real-time candles, supports fast queries and pub/sub.
+- **Ray Cluster:** Distributed compute for real-time indicators, signal generation, and heavy analytics.
+- **Workers:** Each Ray worker can run a strategy, indicator, or ML model in parallel.
+- **Zerodha API:** Source of live and historical market data.
 
 ---
 
