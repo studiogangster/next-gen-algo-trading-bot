@@ -71,42 +71,20 @@ A full-stack trading dashboard for live and historical market data visualization
 
 ## System Architecture
 
-<!--
-The following is a Mermaid diagram for Markdown/README rendering only.
-If you see a JSON parse error, your tool may not support Markdown diagrams.
--->
+> **Note:** The following Mermaid diagram is GitHub-compatible. For best results, view this README on GitHub.
 
 ```mermaid
 flowchart TD
-    subgraph User
-        F[Frontend (Vue.js)]
-    end
-    subgraph API
-        B[Backend (FastAPI)]
-    end
-    subgraph Data
-        R[Redis<br/>(TimeSeries)]
-    end
-    subgraph Compute
-        RW[Ray Cluster]
-        W1[Worker 1]
-        W2[Worker 2]
-        Wn[Worker N]
-    end
-    subgraph Broker
-        Z[Zerodha API]
-    end
-
-    Z -- Market Data --> B
-    B -- Write/Read Candles --> R
-    F -- REST/WebSocket --> B
-    B -- Query/Stream Data --> F
-    R -- Pub/Sub, TimeSeries --> RW
-    RW -- Signal/Indicator Results --> R
-    RW --> W1
-    RW --> W2
-    RW --> Wn
-    B -- Task Dispatch --> RW
+    Z[Zerodha API] -->|Market Data| B[Backend (FastAPI)]
+    B -->|Write/Read Candles| R[Redis (TimeSeries)]
+    F[Frontend (Vue.js)] -->|REST/WebSocket| B
+    B -->|Query/Stream Data| F
+    R -->|Pub/Sub, TimeSeries| RW[Ray Cluster]
+    RW -->|Signal/Indicator Results| R
+    RW --> W1[Worker 1]
+    RW --> W2[Worker 2]
+    RW --> Wn[Worker N]
+    B -->|Task Dispatch| RW
 ```
 
 **Legend:**
