@@ -13,7 +13,7 @@ def get_candles(
     timeframe: str,
     start: int = Query(..., description="Start timestamp (epoch seconds)"),
     end: int = Query(..., description="End timestamp (epoch seconds)"),
-    limit: int = Query(1000, description="Max number of candles to return")
+    limit: int = Query(100, description="Max number of candles to return")
 ):
     """
     Fetch OHLC candles from RedisTimeSeries for a given instrument and timeframe.

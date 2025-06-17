@@ -6,6 +6,7 @@ import re
 from brokers.kite_trade import ZerodhaBroker
 from brokers.utils import login
 from dotenv import load_dotenv
+from brokers.zerodha import sync_zerodha_historical_realtime
 from config.settings import FeedConfig, Settings
 from core.engine import Engine, EngineConfig
 from core.aggregator import TimeframeAggregator
@@ -106,10 +107,23 @@ def start(config_path: str = typer.Option("config/config.yaml", help="Path to co
             timeframe=timeframe,
             interval_days=60
         )
+    def realtime_loader(symbol, timeframe):
+        # Use the same credentials as the feed
+        return sync_zerodha_historical_realtime(
+            enctoken=enctoken,
+            symbol=symbol,
+            timeframe=timeframe,
+            sync_interval=0.5,
+            interval_days=60,
+            partition_timestamp=None
+        )
+    
+    
     aggregator = TimeframeAggregator(
         settings.timeframes,
         symbols=settings.symbols,
-        historical_loader=historical_loader
+        historical_loader=historical_loader,
+        realtime_loader=realtime_loader
     )
 
     # Engine config

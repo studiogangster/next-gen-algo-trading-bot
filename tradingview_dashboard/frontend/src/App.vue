@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import TradingViewChart from './components/TradingViewChart.vue'
 
 // Example chart configs (can be made dynamic)
@@ -12,6 +12,12 @@ const charts = ref([
 ])
 
 let nextId = 3
+
+// Polling interval in milliseconds (default 1 second)
+const pollInterval = ref(1000)
+
+// Store polling interval IDs for cleanup
+const pollingIntervals = ref({})
 
 function addChart() {
   charts.value.push({
@@ -32,7 +38,7 @@ const symbolToToken = {
   RELIANCE: 738561
 }
 
-async function fetchChartData(symbol, timeframe, start = null, end = null, limit = 5) {
+async function fetchChartData(symbol, timeframe, start = null, end = null, limit = 100) {
   const instrument_token = symbolToToken[symbol]
   if (!instrument_token) return []
 
@@ -142,12 +148,58 @@ async function fetchOlderCandles(chart, count = 1000) {
   }
 }
 
+async function startPollingLatest(chart) {
+  // Clear any existing interval for this chart
+  if (pollingIntervals.value[chart.id]) {
+    clearInterval(pollingIntervals.value[chart.id])
+  }
+  // Poll for latest data
+  pollingIntervals.value[chart.id] = setInterval(async () => {
+    // Get today's midnight (UTC, since backend uses epoch UTC)
+    const now = new Date();
+    const todayMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+    const todayEpoch = Math.floor(todayMidnight.getTime() / 1000);
+
+    // Fetch all candles for today (from midnight to now)
+    const latestData = await fetchChartData(chart.symbol, chart.timeframe, todayEpoch, null, 1000);
+
+    // Remove all candles for today from chart.data
+    const oldData = chart.data.filter(c => c.time < todayEpoch);
+
+    // Upsert: combine old data with today's latest data, sort, dedupe
+    let merged = [...oldData, ...latestData]
+      .sort((a, b) => a.time - b.time)
+      .filter((item, idx, arr) => idx === 0 || item.time > arr[idx - 1].time);
+
+    chart.data = merged;
+    chart.latestEpoch = chart.data.length > 0 ? chart.data[chart.data.length - 1].time : null;
+    chart.oldestEpoch = chart.data.length > 0 ? chart.data[0].time : null;
+  }, pollInterval.value)
+}
+
 // Initial load
-loadAllChartData()
+async function initializeCharts() {
+  await loadAllChartData()
+  // Start polling for each chart
+  for (const chart of charts.value) {
+    startPollingLatest(chart)
+  }
+}
+
+onMounted(() => {
+  initializeCharts()
+})
+
+onBeforeUnmount(() => {
+  // Clear all polling intervals
+  Object.values(pollingIntervals.value).forEach(id => clearInterval(id))
+})
 
 // Watch for symbol/timeframe changes and reload data
 async function onChartConfigChange(chart) {
   chart.data = await fetchChartData(chart.symbol, chart.timeframe)
+  // Restart polling for this chart with new config
+  startPollingLatest(chart)
 }
 </script>
 

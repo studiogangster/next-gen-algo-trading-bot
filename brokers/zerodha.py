@@ -6,10 +6,11 @@ from brokers.kite_trade import ZerodhaBroker
 from storage.redis_client import get_redis_client
 import time
 
-def sync_zerodha_historical_realtime(enctoken, symbol, timeframe, sync_interval=60, interval_days=60):
+def sync_zerodha_historical_realtime(enctoken, symbol, timeframe, sync_interval=60, interval_days=60, partition_timestamp=None):
     """
     Periodically syncs the latest historical candles from the last known timestamp in Redis up to now.
     Runs every `sync_interval` seconds.
+    If partition_timestamp is provided, it will be used as the starting point for fetching new data.
     """
     from storage.redis_client import ts_range
     instrument_token = int(symbol)
@@ -24,25 +25,32 @@ def sync_zerodha_historical_realtime(enctoken, symbol, timeframe, sync_interval=
                 ts_data = []
             else:
                 raise
-        if ts_data:
+        if partition_timestamp is not None:
+            from_date = partition_timestamp if isinstance(partition_timestamp, datetime) else datetime.fromtimestamp(partition_timestamp)
+        elif ts_data:
             redis_max = int(ts_data[-1][0])
             from_date = datetime.fromtimestamp(redis_max)
         else:
             from_date = None  # Will default to previous_days in fetch_zerodha_historical
-
+            
+        
+        # Today's 00:00 timestamp
+        from datetime import time as _time
+        today_midnight = datetime.combine(datetime.today(),  _time.min)
+        from_date = min(from_date, today_midnight)
         to_date = datetime.now()
         print(f"[sync_zerodha_historical_realtime] Syncing from {from_date} to {to_date}")
 
         # Fetch and ingest new data
         for _ in fetch_zerodha_historical(
-            enctoken, symbol, timeframe, from_date=from_date, to_date=to_date, interval_days=interval_days
+            enctoken, symbol, timeframe, from_date=from_date, to_date=to_date, interval_days=interval_days, upsert=True
         ):
             pass  # fetch_zerodha_historical already ingests and prints
 
         print(f"[sync_zerodha_historical_realtime] Sleeping for {sync_interval} seconds...")
         time.sleep(sync_interval)
 
-def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_date=None, previous_days = 350 * 20, interval_days=60):
+def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_date=None, previous_days = 350 * 20, interval_days=60 , upsert = False):
     """
     Yield historical candles for a symbol and timeframe from Zerodha, in chunks of interval_days.
     Each yield is a DataFrame with columns: timestamp, open, high, low, close, volume
@@ -89,6 +97,12 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
     else:
         redis_min = None
         redis_max = None
+        
+        
+    if upsert:
+        redis_min = None
+        redis_max = None
+        
 
     # Convert from_date and to_date to epoch
     req_min = int(from_date.timestamp())
@@ -141,10 +155,11 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
         print("[fetch_zerodha_historical] All requested candles are already in Redis.")
         return
 
-    for fetch_from, fetch_to in fetch_ranges:
-        current_from = fetch_from
-        while current_from < fetch_to:
-            current_to = min(current_from + timedelta(days=interval_days), fetch_to)
+    # Process fetch_ranges from latest to oldest
+    for fetch_from, fetch_to in reversed(fetch_ranges):
+        current_to = fetch_to
+        while current_to > fetch_from:
+            current_from = max(fetch_from, current_to - timedelta(days=interval_days))
             print(f"[fetch_zerodha_historical] Fetching: {current_from} to {current_to} ...")
             candles = kite.historical_data(
                 instrument_token=instrument_token,
@@ -160,6 +175,8 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
                 df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
                 print(f"[fetch_zerodha_historical] Fetched {len(df)} rows for {current_from.date()} to {current_to.date()}")
 
+                # Reverse DataFrame to newest-to-oldest order
+                df = df.iloc[::-1].reset_index(drop=True)
  
                 # Cache only missing candles to RedisTimeSeries (one series per field)
                 pipe = get_redis_client().pipeline(transaction=False)
@@ -172,11 +189,12 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
                     for field in ["open", "high", "low", "close"]:
                         ts_field_key = f"ts:candle:{instrument_token}:{timeframe}:{field}"
                         value = getattr(row, field)
-                        ts_add(ts_field_key, epoch, float(value), pipe=pipe, labels={"type": "ohlc", "instrument_token": instrument_token, "timeframe": timeframe,"sub_type":  field }    )
+                        ts_add(ts_field_key, epoch, float(value), pipe=pipe, labels={"type": "ohlc", "instrument_token": instrument_token, "timeframe": timeframe,"sub_type":  field }   , upsert=upsert )
                 pipe.execute()
                 print(f"[fetch_zerodha_historical] Ingested new candles into RedisTimeSeries for {current_from} to {current_to}.")
 
                 yield df
             else:
                 print(f"[fetch_zerodha_historical] No data for {current_from.date()} to {current_to.date()}")
-            current_from = current_to
+                break
+            current_to = current_from

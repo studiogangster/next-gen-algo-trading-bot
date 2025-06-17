@@ -172,18 +172,29 @@ function resizeChart() {
 let lastDataLength = 0
 
 // Watch for data updates
-watch(() => props.data, (newData) => {
+watch(() => props.data, (newData, oldData) => {
   if (series) {
-    series.setData(mapDataToSeries(newData))
-    emit('update', newData)
-    // If new data was prepended (older candles), extend the visible range to include the new oldest candle
-    if (newData.length > lastDataLength && newData.length > 0) {
-      const oldest = newData[0].time
-      const latest = newData[newData.length - 1].time
-      // Set visible range to cover all loaded data
-      chart.timeScale().setVisibleRange({ from: oldest, to: latest })
+    // Save current logical range before updating data
+    let prevLogicalRange = null;
+    let barsAdded = 0;
+    if (chart && oldData && newData && newData.length > oldData.length) {
+      prevLogicalRange = chart.timeScale().getVisibleLogicalRange();
+      barsAdded = newData.length - oldData.length;
     }
-    lastDataLength = newData.length
+
+    series.setData(mapDataToSeries(newData));
+    emit('update', newData);
+
+    // If new data was prepended (older candles), preserve scroll position
+    if (prevLogicalRange && barsAdded > 0) {
+      // Shift the logical range right by the number of new bars added
+      chart.timeScale().setVisibleLogicalRange({
+        from: prevLogicalRange.from + barsAdded,
+        to: prevLogicalRange.to + barsAdded
+      });
+    }
+
+    lastDataLength = newData.length;
   }
 }, { deep: true })
 

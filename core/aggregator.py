@@ -7,28 +7,42 @@ class TimeframeAggregator(BaseTimeframeAggregator):
     Aggregates tick or 1m data into higher timeframes (5m, 30m, 1h, etc.) per symbol.
     """
 
-    def __init__(self, timeframes: list, symbols: list = None, historical_loader=None):
+    def __init__(self, timeframes: list, symbols: list = None, historical_loader=None , realtime_loader = None ):
         """
         timeframes: list of timeframes (e.g. ["1m", "5m"])
         symbols: list of symbols to preload historical data for
         historical_loader: function(symbol, timeframe) -> pd.DataFrame
+        realtime_loader: function(symbol, timeframe) -> pd.DataFrame
         """
         self.timeframes = timeframes
         self.data: Dict[str, pd.DataFrame] = {}  # symbol -> 1m candles DataFrame
         self.agg_cache: Dict[str, Dict[str, pd.DataFrame]] = {}  # symbol -> timeframe -> DataFrame
 
         # Load historical data if loader and symbols provided
-        if historical_loader and symbols:
-            for symbol in symbols:
-                for tf in timeframes:
-                    candles_gen = historical_loader(symbol, tf)
-                    if candles_gen is not None:
-                        for candles in candles_gen:
-                            if candles is not None and not candles.empty:
-                                self.load_historical(symbol, tf, candles)
-                                print(f"[Aggregator] Loaded historical for {symbol} {tf}: {len(candles)} rows")
+        if  symbols:
+            
+            if historical_loader:
+                for symbol in symbols:
+                    for tf in timeframes:
+                        candles_gen = historical_loader(symbol, tf)
+                        if candles_gen is not None:
+                            for candles in candles_gen:
+                                if candles is not None and not candles.empty:
+                                    self.load_historical(symbol, tf, candles)
+                                    print(f"[Aggregator] Loaded historical for {symbol} {tf}: {len(candles)} rows")
 
+            if realtime_loader:
+                for symbol in symbols:
+                    for tf in timeframes:
+                        candles_gen = realtime_loader(symbol, tf)
+                        if candles_gen is not None:
+                            for candles in candles_gen:
+                                if candles is not None and not candles.empty:
+                                    self.load_historical(symbol, tf, candles)
+                                    print(f"[Aggregator] Realtime historical loader for {symbol} {tf}: {len(candles)} rows")
 
+                
+            
 
 
 
