@@ -1,0 +1,5 @@
+# Create .env andreplace the values with real substance.
+USERID={zerodha_user_ud}
+PASSWORD={zerodha_password}
+OTP_SALT={otp_mfa_salt}
+ZERODHA_API_KEY=AlgoTrader
