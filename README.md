@@ -21,6 +21,49 @@ A full-stack trading dashboard for live and historical market data visualization
 
 ---
 
+
+
+## System Architecture
+
+> **Note:** The following Mermaid diagram is GitHub-compatible. For best results, view this README on GitHub.
+
+```mermaid
+flowchart TD
+    subgraph User
+        F[Frontend - Vue.js]
+    end
+    subgraph API
+        B[Backend - FastAPI]
+    end
+    subgraph Data
+        R[Redis\nTimeSeries]
+    end
+    subgraph Compute
+        RW[Ray Cluster]
+        W1[Worker 1]
+        W2[Worker 2]
+        Wn[Worker N]
+    end
+    subgraph Broker
+        Z[Zerodha API]
+    end
+
+    Z -- Market Data --> B
+    B -- Write/Read Candles --> R
+    F -- REST/WebSocket --> B
+    B -- Query/Stream Data --> F
+    R -- Pub/Sub, TimeSeries --> RW
+    RW -- Signal/Indicator Results --> R
+    RW --> W1
+    RW --> W2
+    RW --> Wn
+    B -- Task Dispatch --> RW
+```
+
+---
+
+
+
 ## Why This Bot is Better Than Any Other in the Market
 
 - **True Real-Time Upsert**: Unlike most dashboards that only append new candles, this bot upserts all of today's data on every poll, ensuring you always see the most accurate and up-to-date chart—even if the broker corrects or backfills data.
@@ -69,42 +112,6 @@ A full-stack trading dashboard for live and historical market data visualization
 
 ---
 
-## System Architecture
-
-> **Note:** The following Mermaid diagram is GitHub-compatible. For best results, view this README on GitHub.
-
-```mermaid
-flowchart TD
-    subgraph User
-        F[Frontend - Vue.js]
-    end
-    subgraph API
-        B[Backend - FastAPI]
-    end
-    subgraph Data
-        R[Redis\nTimeSeries]
-    end
-    subgraph Compute
-        RW[Ray Cluster]
-        W1[Worker 1]
-        W2[Worker 2]
-        Wn[Worker N]
-    end
-    subgraph Broker
-        Z[Zerodha API]
-    end
-
-    Z -- Market Data --> B
-    B -- Write/Read Candles --> R
-    F -- REST/WebSocket --> B
-    B -- Query/Stream Data --> F
-    R -- Pub/Sub, TimeSeries --> RW
-    RW -- Signal/Indicator Results --> R
-    RW --> W1
-    RW --> W2
-    RW --> Wn
-    B -- Task Dispatch --> RW
-```
 
 **Legend:**
 - **Frontend (Vue.js):** User interface for charts, controls, and live data.
