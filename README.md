@@ -8,6 +8,7 @@ Designed to be the core engine for AI trading bots—enabling lightning-fast exe
 
 ## Features
 
+- **Per-Instrument Parallel Fetching**: Each instrument's data is fetched in a separate worker process, eliminating rate limits and bottlenecks. Data is cached and persisted independently for maximum reliability and throughput.
 - **Live & Historical Charting**: Interactive candlestick charts with infinite scroll for historical data and real-time updates.
 - **Real-Time Polling & Upsert**: Frontend polls for the latest candles every second (configurable), upserting all of today's data to ensure accuracy and deduplication.
 - **Scroll-Back Pagination**: Load older candles by scrolling left; chart preserves your scroll position after data loads, for a seamless experience.
@@ -120,7 +121,7 @@ flowchart TD
 - **Backend (FastAPI):** Handles API requests, data ingestion, and orchestration.
 - **Redis (TimeSeries):** Stores all historical and real-time candles, supports fast queries and pub/sub.
 - **Ray Cluster:** Distributed compute for real-time indicators, signal generation, and heavy analytics.
-- **Workers:** Each Ray worker can run a strategy, indicator, or ML model in parallel.
+- **Workers:** Each Ray worker can run a strategy, indicator, or ML model in parallel. Each instrument's data fetch runs in its own worker, ensuring no rate limit or bottleneck issues.
 - **Zerodha API:** Source of live and historical market data.
 
 ---
