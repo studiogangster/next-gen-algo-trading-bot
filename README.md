@@ -102,13 +102,9 @@ A full-stack trading dashboard for live and historical market data visualization
 
 ### 1. Backend (Python, FastAPI)
 
-- **Install dependencies**:
+- **Install dependencies (using [uv](https://github.com/astral-sh/uv))**:
   ```bash
-  pip install -r requirements.txt
-  ```
-  Or, if using Poetry:
-  ```bash
-  poetry install
+  uv pip install -r requirements.txt
   ```
 
 - **Environment variables**:  
@@ -117,7 +113,7 @@ A full-stack trading dashboard for live and historical market data visualization
 - **Run Redis**:  
   Make sure Redis is running (locally or via Docker).
 
-- **Start backend**:
+- **Start backend in development mode**:
   ```bash
   uvicorn tradingview_dashboard.backend.main:app --reload
   ```
@@ -168,4 +164,4 @@ Pull requests and issues are welcome! Please open an issue to discuss your ideas
 
 ## License
 
-[MIT](LICENSE) (or specify your license here)
+[MIT](LICENSE)
