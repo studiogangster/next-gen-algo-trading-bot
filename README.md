@@ -75,16 +75,35 @@ A full-stack trading dashboard for live and historical market data visualization
 
 ```mermaid
 flowchart TD
-    Z[Zerodha API] -->|Market Data| B[Backend (FastAPI)]
-    B -->|Write/Read Candles| R[Redis (TimeSeries)]
-    F[Frontend (Vue.js)] -->|REST/WebSocket| B
-    B -->|Query/Stream Data| F
-    R -->|Pub/Sub, TimeSeries| RW[Ray Cluster]
-    RW -->|Signal/Indicator Results| R
-    RW --> W1[Worker 1]
-    RW --> W2[Worker 2]
-    RW --> Wn[Worker N]
-    B -->|Task Dispatch| RW
+    subgraph User
+        F[Frontend - Vue.js]
+    end
+    subgraph API
+        B[Backend - FastAPI]
+    end
+    subgraph Data
+        R[Redis\nTimeSeries]
+    end
+    subgraph Compute
+        RW[Ray Cluster]
+        W1[Worker 1]
+        W2[Worker 2]
+        Wn[Worker N]
+    end
+    subgraph Broker
+        Z[Zerodha API]
+    end
+
+    Z -- Market Data --> B
+    B -- Write/Read Candles --> R
+    F -- REST/WebSocket --> B
+    B -- Query/Stream Data --> F
+    R -- Pub/Sub, TimeSeries --> RW
+    RW -- Signal/Indicator Results --> R
+    RW --> W1
+    RW --> W2
+    RW --> Wn
+    B -- Task Dispatch --> RW
 ```
 
 **Legend:**
