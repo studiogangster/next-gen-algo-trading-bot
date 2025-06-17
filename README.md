@@ -215,7 +215,22 @@ flowchart TD
 
 ## Contributing
 
-Pull requests and issues are welcome! Please open an issue to discuss your ideas or report bugs.
+Sure, you could open a pull request or file an issue...  
+But let's be honest—if you really want to show appreciation or get your feature request noticed, just send some BTC to my wallet instead.  
+It's faster, more fun, and keeps this project (and my caffeine supply) alive.
+
+**BTC Wallet:** 
+
+BTC Address
+```
+bc1qphn0ha6svwjwr3rumyplfqnwt9h8hep7pa9jaf
+```
+
+Travel Address
+```
+ta6JM5xFHqXKLmhGd6aqZXUkrWUfFn1PU5sE7MGYpCTjqA9krw2tELPPiSbcK673na57wJDE
+```
+(But hey, if you insist on adding commits, I won't stop you.)
 
 ---
 
