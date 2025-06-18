@@ -50,7 +50,7 @@ def get_candles(
             field_data[key] = {int(ts): float(val) for ts, val in data}
 
     # Ensure all four OHLC fields are present
-    expected_fields = {"open", "high", "low", "close"}
+    expected_fields = {"open", "high", "low", "close", "volume"}
     if not expected_fields.issubset(field_data.keys()):
         raise HTTPException(status_code=404, detail=f"Missing one or more OHLC fields  ")
 
@@ -66,6 +66,7 @@ def get_candles(
             "high": field_data["high"][ts],
             "low": field_data["low"][ts],
             "close": field_data["close"][ts],
+            "volume": field_data["volume"][ts],
         }
         for ts in sorted_ts
     ]
@@ -89,7 +90,7 @@ def _get_candles(
     f"interval={timeframe}"
     ]
     
-    fields = ["open", "high", "low", "close"]
+    fields = ["open", "high", "low", "close", "volume"]
     base_key = f"ts:candle:{instrument_token}:{timeframe}"
 
     from_ts = str(start) if start >= 0 else "-"
@@ -120,6 +121,7 @@ def _get_candles(
             "high": field_data["high"][ts],
             "low": field_data["low"][ts],
             "close": field_data["close"][ts],
+            "volume": field_data["volume"][ts],
             "epoch": ts,
         }
         for ts in sorted_ts

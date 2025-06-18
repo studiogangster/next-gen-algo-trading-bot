@@ -8,7 +8,7 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
-import { createChart, CandlestickSeries } from 'lightweight-charts'
+import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts'
 
 const props = defineProps({
   symbol: { type: String, required: true },
@@ -22,6 +22,7 @@ const emit = defineEmits(['ready', 'update'])
 const chartContainer = ref(null)
 let chart = null
 let series = null
+let volumeSeries = null
 
 // Custom tooltip state
 const tooltip = ref({
@@ -55,9 +56,24 @@ function mapDataToSeries(data) {
     }));
 }
 
+// Map volume data to { time, value, color }
+function mapVolumeData(data) {
+  return data
+    .filter(d => d.time && !isNaN(d.time))
+    .map(d => ({
+      time: d.time,
+      value: d.volume,
+      color: d.close >= d.open ? '#26a69a' : '#ef5350'
+    }));
+}
+
 
 
 onMounted(() => {
+  if (!chartContainer.value) {
+    console.error('Chart container element is null');
+    return;
+  }
   chart = createChart(chartContainer.value, {
     width: chartContainer.value.clientWidth,
     height: 350,
@@ -94,6 +110,17 @@ onMounted(() => {
   // ✅ Add series AFTER timeScale options
   series = chart.addSeries(CandlestickSeries, { timeVisible: true })
   series.setData(mapDataToSeries(props.data))
+
+  // Add volume histogram series at the bottom (for lightweight-charts v5+)
+  // volumeSeries = chart.addSeries(HistogramSeries, {
+  //   priceFormat: { type: 'volume' },
+  //   color: '#26a69a',
+  //   priceScaleId: '', // separate scale
+  //   scaleMargins: { top: 0.8, bottom: 0 }, // push to bottom
+  // });
+  
+
+  // volumeSeries.setData(mapVolumeData(props.data));
 
   // Custom tooltip: show original timestamp string in IST if available
   chart.subscribeCrosshairMove(param => {
@@ -183,6 +210,10 @@ watch(() => props.data, (newData, oldData) => {
     }
 
     series.setData(mapDataToSeries(newData));
+    if (volumeSeries) {
+      volumeSeries.setData(mapVolumeData(newData));
+    }
+
     emit('update', newData);
 
     // If new data was prepended (older candles), preserve scroll position
@@ -209,9 +240,9 @@ watch(() => props.timeframe, (newTf, oldTf) => {
 
 <style scoped>
 .tv-chart-container {
-  width: 100%;
-  min-width: 300px;
-  height: 350px;
+  width: 100vw;
+  /* min-width: 300px; */
+  height: 100vh;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
   background: #fff;

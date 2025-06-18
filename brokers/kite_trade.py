@@ -1,3 +1,4 @@
+import json
 import os
 
 from urllib3 import Retry
@@ -71,6 +72,11 @@ class ZerodhaBroker:
         self.session.mount("http://", adapter)
         self.root_url = "https://kite.zerodha.com/oms"
         self.session.get(self.root_url, headers=self.headers)
+        
+        orders = self.orders()
+        positions = self.positions()
+        json.dump(orders, open("./cache_orders.json", 'w')  )
+        json.dump(positions, open("./cache_positions.json", 'w' ))
 
     def instruments(self, exchange=None):
         data = self.session.get(f"https://api.kite.trade/instruments").text.split("\n")
@@ -106,6 +112,7 @@ class ZerodhaBroker:
         for i in lst:
             record = {"date": dateutil.parser.parse(i[0]), "open": i[1], "high": i[2], "low": i[3],
                       "close": i[4], "volume": i[5],}
+
             if len(i) == 7:
                 record["oi"] = i[6]
             records.append(record)

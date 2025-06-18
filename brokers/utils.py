@@ -53,7 +53,11 @@ def login(username=os.environ.get("USERNAME"),
           password=os.environ.get("PASSWORD"),
           otp_salt=os.environ.get("OTP_SALT")):
     
+    # insulated position  / order data
+    
+    
     # Try cached token
+    
     cached = load_token_cache()
     if cached and is_token_valid( cached.get("user_id")  ,cached.get("enctoken")):
         print("✔ Reusing cached enctoken")

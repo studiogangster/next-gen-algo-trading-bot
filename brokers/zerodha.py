@@ -85,7 +85,7 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
     from storage.redis_client import ts_add, ts_range, ts_get
 
     # Use the 'open' field timeseries for Redis coverage check
-    ts_field_key = f"ts:candle:{instrument_token}:{timeframe}:open"
+    ts_field_key = f"ts:candle:{instrument_token}:{timeframe}:volume"
 
     # Find the lowest and highest timestamp in RedisTimeSeries for the requested range
     try:
@@ -175,6 +175,7 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
             )
             if candles:
                 df = pd.DataFrame(candles)
+
                 df.rename(columns={"date": "timestamp", "volume": "volume"}, inplace=True)
                 df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
                 print(f"[fetch_zerodha_historical] Fetched {len(df)} rows for {current_from.date()} to {current_to.date()}")
@@ -190,7 +191,7 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
                         ts = pd.to_datetime(ts)
                     epoch = int(ts.timestamp())
                     # Insert each field into its own time series
-                    for field in ["open", "high", "low", "close"]:
+                    for field in ["open", "high", "low", "close", "volume"]:
                         ts_field_key = f"ts:candle:{instrument_token}:{timeframe}:{field}"
                         value = getattr(row, field)
                         ts_add(ts_field_key, epoch, float(value), pipe=pipe, labels={"type": "ohlc", "instrument_token": instrument_token, "timeframe": timeframe,"sub_type":  field }   , upsert=upsert )
