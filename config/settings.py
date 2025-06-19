@@ -44,7 +44,7 @@ class Settings(BaseModel):
     storage: StorageConfig
     strategies: List[StrategyConfig]
     dry_run: bool = False
-    max_workers: int = 4
+    max_workers: int = 10
 
     @validator("timeframes", pre=True)
     def validate_timeframes(cls, v):

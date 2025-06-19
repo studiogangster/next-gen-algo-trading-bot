@@ -7,8 +7,8 @@ from brokers.kite_trade import ZerodhaBroker
 from brokers.utils import login
 from dotenv import load_dotenv
 from brokers.zerodha import sync_zerodha_historical_realtime
-from config.settings import FeedConfig, Settings
-from core.engine import Engine, EngineConfig
+from config.settings import BrokerConfig, FeedConfig, Settings
+from core.engine import  Engine, EngineConfig
 from strategies.supertrend_rsi import SupertrendRSIStrategy
 from feeds.zerodha_ws import ZerodhaWebSocketFeed
 from storage.parquet import ParquetStorage
@@ -59,7 +59,7 @@ def start(config_path: str = typer.Option("config/config.yaml", help="Path to co
     if settings.feed.type == "zerodha_ws":
         
         feed_config = cast(FeedConfig, settings.feed)
-        login_response =  login( feed_config.username , feed_config.password , feed_config.otp_salt,  )
+        login_response =  login(   )
         enctoken = login_response["enctoken"]     
         
         access_token = enctoken+"&user_id="+feed_config.username   
@@ -72,10 +72,10 @@ def start(config_path: str = typer.Option("config/config.yaml", help="Path to co
 
     # Instantiate broker
     if settings.broker.type == "zerodha":
-        login_response =  login( feed_config.username , feed_config.password , feed_config.otp_salt,  )
+        login_response =  login(    )
         enctoken = login_response["enctoken"]     
         broker = ZerodhaBroker(
-            enctoken=enctoken,
+
 
         )
     else:
@@ -96,6 +96,8 @@ def start(config_path: str = typer.Option("config/config.yaml", help="Path to co
             raise NotImplementedError(f"Strategy {strat_cfg.type} not implemented")
 
 
+
+
     # Engine config
     engine_config = EngineConfig(
         symbols=settings.symbols,
@@ -107,12 +109,20 @@ def start(config_path: str = typer.Option("config/config.yaml", help="Path to co
         dry_run=settings.dry_run,
         max_workers=settings.max_workers,
     )
+    
+    
 
 
     engine = Engine(engine_config)
+    
+    
+    
     typer.echo("Starting trading engine...")
     engine.start()
     typer.echo("Engine running. Press Ctrl+C to stop.")
+    # position_order_engine = OrderAndPositionWorker(broker=broker)
+    # typer.echo("Starting local-broker engine...")
+    # position_order_engine.start()
     try:
         while True:
             time.sleep(1)

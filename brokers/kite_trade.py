@@ -1,7 +1,10 @@
 import json
 import os
 
+from dotenv import load_dotenv
 from urllib3 import Retry
+
+from brokers.utils import login
 try:
     import requests
 except ImportError:
@@ -15,6 +18,7 @@ except ImportError:
 import requests
 import dateutil.parser
 from requests.adapters import HTTPAdapter
+load_dotenv()
 
 
 
@@ -52,7 +56,7 @@ class ZerodhaBroker:
     EXCHANGE_BFO = "BFO"
     EXCHANGE_MCX = "MCX"
 
-    def __init__(self, enctoken):
+    def __init__(self):
         
         # Define your retry strategy
         retry_strategy = Retry(
@@ -65,7 +69,7 @@ class ZerodhaBroker:
         # Mount the retry strategy to the session
         adapter = HTTPAdapter(max_retries=retry_strategy)
         
-        self.enctoken = enctoken
+        self.enctoken = login()["enctoken"]
         self.headers = {"Authorization": f"enctoken {self.enctoken}"}
         self.session = requests.session()
         self.session.mount("https://", adapter)
@@ -73,10 +77,7 @@ class ZerodhaBroker:
         self.root_url = "https://kite.zerodha.com/oms"
         self.session.get(self.root_url, headers=self.headers)
         
-        orders = self.orders()
-        positions = self.positions()
-        json.dump(orders, open("./cache_orders.json", 'w')  )
-        json.dump(positions, open("./cache_positions.json", 'w' ))
+
 
     def instruments(self, exchange=None):
         data = self.session.get(f"https://api.kite.trade/instruments").text.split("\n")
@@ -105,6 +106,7 @@ class ZerodhaBroker:
             f"{self.root_url}/instruments/historical/{instrument_token}/{interval}", params=params,
             headers=self.headers)
         
+
 
 
         lst = lst.json()["data"]["candles"]

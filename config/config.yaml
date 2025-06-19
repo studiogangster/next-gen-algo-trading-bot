@@ -4,12 +4,9 @@ symbols:
   - "256265"    # RELIANCE instrument token
   - "2953217"   # TCS instrument token
   - "260105"    # BANKNIFTY
+  
 timeframes:
   - "1m"
-  # - "5m"
-  # - "30m"
-  # - "1h"
-  # - "day"
 
 feed:
   type: "zerodha_ws"

@@ -28,18 +28,23 @@ def sync_zerodha_historical_realtime(enctoken, symbol, timeframe, sync_interval=
                 ts_data = []
             else:
                 raise
+            
+        
+        from datetime import time as _time
+        today_midnight = datetime.combine(datetime.today(),  _time.min)
+        
         if partition_timestamp is not None:
             from_date = partition_timestamp if isinstance(partition_timestamp, datetime) else datetime.fromtimestamp(partition_timestamp)
         elif ts_data:
             redis_max = int(ts_data[-1][0])
             from_date = datetime.fromtimestamp(redis_max)
         else:
-            from_date = None  # Will default to previous_days in fetch_zerodha_historical
+            from_date = today_midnight  # Will default to previous_days in fetch_zerodha_historical
             
         
         # Today's 00:00 timestamp
-        from datetime import time as _time
-        today_midnight = datetime.combine(datetime.today(),  _time.min)
+        
+        print("debug", from_date, today_midnight)
         from_date = min(from_date, today_midnight)
         to_date = datetime.now()
         print(f"[sync_zerodha_historical_realtime] Syncing from {from_date} to {to_date}")
@@ -60,7 +65,7 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
     Optionally logs the Ray actor_id if provided.
     """
     
-    kite = ZerodhaBroker(enctoken=enctoken)
+    kite = ZerodhaBroker()
 
     # Map timeframe to Zerodha interval
     interval_map = {

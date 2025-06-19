@@ -1,9 +1,17 @@
+import json
+from time import sleep
+import traceback
 import ray
 from typing import List, Dict, Any, Optional, Callable
+from brokers.kite_trade import ZerodhaBroker
+from brokers.utils import login
 from core.base import BaseFeed, BaseTimeframeAggregator, BaseStrategy, BaseBroker, BaseStorage
 from core.aggregator import TimeframeAggregator
 from brokers.zerodha import sync_zerodha_historical_realtime, fetch_zerodha_historical
 import ray
+
+from storage.redis_client import get_redis_client
+
 
 class EngineConfig:
     def __init__(
@@ -26,6 +34,7 @@ class EngineConfig:
         self.dry_run = dry_run
         self.max_workers = max_workers
 
+
 @ray.remote
 class SymbolWorker:
     def __init__(
@@ -37,9 +46,7 @@ class SymbolWorker:
         storage: BaseStorage,
         dry_run: bool = False,
     ):
-        
-        print("symbol:", symbol)
-        
+
         self.symbol = symbol
         self.timeframes = timeframes
         self.strategies = strategies
@@ -47,7 +54,7 @@ class SymbolWorker:
         self.storage = storage
         self.dry_run = dry_run
         # Get Ray actor ID for logging
-        
+
         # Define per-worker loader functions
         def historical_loader(symbol, timeframe):
             return fetch_zerodha_historical(
@@ -56,7 +63,7 @@ class SymbolWorker:
                 timeframe=timeframe,
                 interval_days=60
             )
-            
+
         def realtime_loader(symbol, timeframe):
             return sync_zerodha_historical_realtime(
                 enctoken=broker.enctoken,
@@ -66,17 +73,40 @@ class SymbolWorker:
                 interval_days=60,
                 partition_timestamp=None
             )
-        
-        self.historical_loader =historical_loader
-        self.realtime_loader =realtime_loader
-        
-        # self.start()
 
-        
+        self.historical_loader = historical_loader
+        self.realtime_loader = realtime_loader
 
+    def start_historical_sync(self):
+        self.actor_id = getattr(ray.get_runtime_context(),
+                                "get_actor_id", lambda: None)()
+        print("self.actor_id", self.actor_id)
+        aggregator = TimeframeAggregator(
+            self.timeframes,
+            symbols=[self.symbol],
+            historical_loader=self.historical_loader,
+        )
+
+        aggregator.start()
+        return True
+
+    def start_realtime_sync(self):
+        self.actor_id = getattr(ray.get_runtime_context(),
+                                "get_actor_id", lambda: None)()
+        print("self.actor_id", self.actor_id)
+
+        aggregator = TimeframeAggregator(
+            self.timeframes,
+            symbols=[self.symbol],
+            realtime_loader=self.realtime_loader
+        )
+
+        aggregator.start()
+        return True
 
     def start(self):
-        self.actor_id = getattr(ray.get_runtime_context(), "get_actor_id", lambda: None)()
+        self.actor_id = getattr(ray.get_runtime_context(),
+                                "get_actor_id", lambda: None)()
         print("self.actor_id", self.actor_id)
         # Each worker gets its own aggregator
         self.aggregator = TimeframeAggregator(
@@ -86,7 +116,6 @@ class SymbolWorker:
             realtime_loader=self.realtime_loader
         )
         self.aggregator.start()
-        
 
     def on_tick(self, tick: dict):
         self.aggregator.add_tick(self.symbol, tick)
@@ -111,19 +140,78 @@ class SymbolWorker:
         for strategy in self.strategies:
             strategy.reset()
 
+
+@ray.remote
+class OrderAndPositionWorker:
+    def __init__(
+        self,
+        broker: ZerodhaBroker,
+        dry_run: bool = False,
+    ):
+        self.broker = broker
+        self.dry_run = dry_run
+        self.redis_client = get_redis_client()
+
+    def start(self):
+
+        response = login()
+        user_id = response["user_id"]
+        self.broker = self.broker()
+
+        while True:
+            try:
+                positions = self.broker.positions()
+                orders = json.dumps( self.broker.orders() )
+                
+                redis_key = f"user:{user_id}:orders"
+                self.redis_client.execute_command(
+                        "SET", f"{redis_key}", orders)
+
+
+                redis_key = f"user:{user_id}:position"
+                if "net" in positions:
+                    net_positions = json.dumps(positions["net"])
+
+                    self.redis_client.execute_command(
+                        "SET", f"{redis_key}:net", net_positions)
+
+                if "day" in positions:
+                    day_positions = json.dumps( positions["day"] )
+                    self.redis_client.execute_command(
+                        "SET", f"{redis_key}:day", day_positions)
+
+            except:
+                traceback.print_exc()
+                pass
+            finally:
+                sleep(0.5)
+
+    def close(self):
+        self.broker.close()
+
+
 class Engine:
-    def __init__(self, config: EngineConfig):
+    def __init__(self, config: EngineConfig,
+
+
+                 ):
         self.config = config
         self.symbol_workers = {}
 
     def start(self):
         print("Engine.start")
         if not ray.is_initialized():
-            ray.init(ignore_reinit_error=True, num_cpus=self.config.max_workers)
-        
-        
+            ray.init(ignore_reinit_error=True,
+                     num_cpus=self.config.max_workers)
+
         workers = []
-        print("self.act", self.config.symbols , self.config.max_workers)
+
+        orderEngine = OrderAndPositionWorker.remote(broker=ZerodhaBroker)
+        workers.append(
+            orderEngine.start.remote()
+        )
+
+        # print("self.act", self.config.symbols , self.config.max_workers)
         for symbol in self.config.symbols:
             worker = SymbolWorker.remote(
                 symbol,
@@ -133,19 +221,18 @@ class Engine:
                 self.config.storage,
                 self.config.dry_run,
             )
-            workers.append(worker.start.remote())
-            self.symbol_workers[symbol] = worker
-            
-            
+            workers.append(worker.start_historical_sync.remote())
+            workers.append(worker.start_realtime_sync.remote())
+            # self.symbol_workers[symbol] = worker
+
         # workers = [
-         
-        #  worker.start.remote() for worker in self.symbol_workers.values()   
+
+        #  worker.start.remote() for worker in self.symbol_workers.values()
         # ]
-            
+
+        print("Engine.start", len(workers))
 
         ray.get(workers)
-            
-            
 
         # def on_data(symbol: str, tick: dict):
         #     if symbol in self.symbol_workers:
