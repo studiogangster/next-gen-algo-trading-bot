@@ -185,6 +185,8 @@ class OrderAndPositionWorker:
                 pass
             finally:
                 sleep(0.5)
+                
+        return True
 
     def close(self):
         self.broker.close()

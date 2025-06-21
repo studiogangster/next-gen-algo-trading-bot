@@ -22,6 +22,7 @@ load_dotenv()
 
 
 
+
 class ZerodhaBroker:
     # Products
     PRODUCT_MIS = "MIS"
@@ -55,13 +56,31 @@ class ZerodhaBroker:
     EXCHANGE_CDS = "CDS"
     EXCHANGE_BFO = "BFO"
     EXCHANGE_MCX = "MCX"
+    
 
     def __init__(self):
         
+        class CustomRetry(Retry):
+            
+            def _login(_self):
+                self.enctoken = login()["enctoken"]        
+                self.headers = {"Authorization": f"enctoken {self.enctoken}"}
+                
+                
+            def __init__(_self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                _self._login()
+
+            def increment(_self, *args, **kwargs):
+                print("login_attempt", args)
+                _self._login()
+                
+                return super().increment(*args, **kwargs)
+        
         # Define your retry strategy
-        retry_strategy = Retry(
+        retry_strategy = CustomRetry(
             total=5,                              # total number of retries
-            status_forcelist=[429, 500, 502, 503, 504],  # retry on these HTTP status codes
+            status_forcelist=[401, 403, 429, 500, 502, 503, 504],  # retry on these HTTP status codes
             backoff_factor=1,                     # exponential backoff: 1s, 2s, 4s, etc.
             raise_on_status=False,                # don't raise exceptions for retriable status codes
         )
@@ -70,7 +89,6 @@ class ZerodhaBroker:
         adapter = HTTPAdapter(max_retries=retry_strategy)
         
         self.enctoken = login()["enctoken"]
-        self.headers = {"Authorization": f"enctoken {self.enctoken}"}
         self.session = requests.session()
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
@@ -107,7 +125,7 @@ class ZerodhaBroker:
             headers=self.headers)
         
 
-
+        print( "status_code",  lst.status_code)
 
         lst = lst.json()["data"]["candles"]
         records = []
