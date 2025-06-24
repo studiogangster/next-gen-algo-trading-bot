@@ -39,6 +39,7 @@ class StrategyConfig(BaseModel):
 class Settings(BaseModel):
     symbols: List[str]
     timeframes: List[str]
+    derived_timeframes:  List[str]
     feed: FeedConfig
     broker: BrokerConfig
     storage: StorageConfig

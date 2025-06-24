@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: backend
+Version: 0.1.0
+Summary: Add your description here
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi>=0.115.12
+Requires-Dist: redis>=6.2.0
+Requires-Dist: uvicorn>=0.34.3
+Requires-Dist: pandas-ta>=0.3.14b0
+Requires-Dist: pandas>=1.3.0

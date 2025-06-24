@@ -56,6 +56,13 @@ def ts_add(key, timestamp, value, labels=None, pipe=None , upsert = False):
     else:
         return client.execute_command(*cmd)
 
+def mts_range(keys, from_ts, to_ts):
+    """
+    Get a range of values from a RedisTimeSeries key.
+    """
+    client = get_redis_client()
+    return client.execute_command("TS.MRANGE", *[keys], from_ts, to_ts)
+
 
 def ts_range(key, from_ts, to_ts):
     """
@@ -70,3 +77,13 @@ def ts_get(key):
     """
     client = get_redis_client()
     return client.execute_command("TS.GET", key)
+
+def ts_mrange(from_ts, to_ts, filters):
+    """
+    Fetch multiple time series with MRANGE.
+    filters: list of label filters, e.g. ["symbol=2953217", "timeframe=1m"]
+    Returns: list of series, each as [key, labels, [ [timestamp, value], ... ]]
+    """
+    client = get_redis_client()
+    print("mrange_query", "TS.MREVRANGE", from_ts, to_ts, "FILTER", *filters)
+    return client.execute_command("TS.MREVRANGE", from_ts, to_ts, "FILTER", *filters)

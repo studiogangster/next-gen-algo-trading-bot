@@ -138,5 +138,29 @@ def stop():
     # In this simple CLI, stop is a placeholder.
     typer.echo("To stop the engine, interrupt the process (Ctrl+C).")
 
+@app.command('generate-timeframe')
+def generate_timeframes(
+    config_path: str = typer.Option("config/config.yaml", help="Path to config YAML file"),
+    poll_interval: int = typer.Option(5, help="Polling interval in seconds")
+):
+    """
+    Start the timeframe generator worker to aggregate 1m candles into higher timeframes.
+    """
+    import ray
+    from core.timeframe_generator_worker import TimeframeGeneratorWorker
+
+    typer.echo("Starting TimeframeGeneratorWorker...")
+    ray.init(ignore_reinit_error=True)
+    
+    
+    worker = TimeframeGeneratorWorker.remote(config=  load_config(config_path), poll_interval=poll_interval)
+    worker.run.remote()
+    typer.echo("TimeframeGeneratorWorker running. Press Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(60)
+    except KeyboardInterrupt:
+        typer.echo("Shutting down TimeframeGeneratorWorker...")
+
 if __name__ == "__main__":
     app()

@@ -1,12 +1,22 @@
 # Sample configuration for the modular algo trading framework
 
 symbols:
-  - "256265"    # RELIANCE instrument token
+  - "256265"    # NIFTY instrument token
   - "2953217"   # TCS instrument token
   - "260105"    # BANKNIFTY
 
 timeframes:
   - "1m"
+
+derived_timeframes:
+  - "5m"
+  - "15m"
+  - "30m"
+  - "1h"
+  - "1d"
+  - "1w"
+  - "1M"
+  - "1y"
 
 feed:
   type: "zerodha_ws"
