@@ -4,7 +4,7 @@ import TradingViewChart from './components/TradingViewChart.vue'
 
 // Example chart configs (can be made dynamic)
 const availableSymbols = ['NIFTY', 'BANKNIFTY', 'TCS']
-const availableTimeframes = ['1m', '5m', '30m', '15m', '1h', 'day']
+const availableTimeframes = ['1m', '5m', '30m', '15m', '1h', '1d']
 
 const charts = ref([
   { id: 1, symbol: 'NIFTY', timeframe: '1m', data: [] },

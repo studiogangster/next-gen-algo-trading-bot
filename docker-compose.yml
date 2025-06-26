@@ -1,11 +1,19 @@
 version: '3'
 services:
   redis:
-    # Use Redis Stack for RedisTimeSeries support
     image: redis/redis-stack-server:latest
     restart: always
+    expose:
+      - 6379
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+    environment:
+      - REDIS_ARGS=--appendonly yes --appendfsync everysec --protected-mode no
+    # command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--protected-mode" , "no"]
+
+
 
   redis-insight:
     image: redis/redisinsight:latest
@@ -26,3 +34,4 @@ services:
     
 volumes:
   redis-insight:
+  redis-data:

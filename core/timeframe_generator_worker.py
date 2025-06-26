@@ -69,30 +69,43 @@ def fetch_1m_candles(symbol, from_ts, to_ts):
 def parse_redis_candles(data):
     return pd.DataFrame(data)
 
-def aggregate_candles(df, timeframe):
+def aggregate_candles(df, timeframe, market_open_time="09:15"):
     # df: DataFrame with 1m candles, must have 'timestamp' as datetime
+    # market_open_time: "HH:MM" string, e.g., "09:15" for NSE
     if df.empty:
         return df
     df = df.copy()
-    df["timestamp"] = pd.to_datetime(df["timestamp"]) #.dt.tz_convert("Asia/Kolkata")
+    # Ensure timestamp is in Asia/Kolkata timezone
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert("Asia/Kolkata")
     df = df.set_index("timestamp")
     if timeframe.endswith("m"):
         rule = f"{int(timeframe[:-1])}min"
     elif timeframe.endswith("h"):
-        rule = f"{int(timeframe[:-1])}H"
+        rule = f"{int(timeframe[:-1])}h"
     elif timeframe.endswith("d"):
         rule = f"{int(timeframe[:-1])}D"
     elif timeframe.endswith("w"):
         rule = f"{int(timeframe[:-1])}W"
     elif timeframe.endswith("M"):
-        rule = f"{int(timeframe[:-1])}M"  # M = month in Pandas DateOffset
+        rule = f"{int(timeframe[:-1])}ME"  # M = month in Pandas DateOffset
     elif timeframe.endswith("y"):
-        rule = f"{int(timeframe[:-1])}Y"
+        rule = f"{int(timeframe[:-1])}YE"
     else:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
-    
-    print("resampling")
-    agg = df.resample(rule, label="left", closed="left").agg({
+
+    # Convert market_open_time "HH:MM" to Timedelta
+    hours, minutes = map(int, market_open_time.split(":"))
+    offset_td = pd.Timedelta(hours=hours, minutes=minutes)
+
+    # Align to NSE market open (09:15 Asia/Kolkata)
+    print("resampling (NSE aligned)")
+    agg = df.resample(
+        rule,
+        label="left",
+        closed="left",
+        origin="start_day",
+        offset=offset_td
+    ).agg({
         "open": "first",
         "high": "max",
         "low": "min",
@@ -137,7 +150,7 @@ class TimeframeGeneratorWorker:
                     for tf in self.target_timeframes:
                         print(f"Timeframe generator for  {symbol} ")
                         
-                        agg = aggregate_candles(df, tf)
+                        agg = aggregate_candles(df, tf, market_open_time="09:15")
                         
                         print("time_diff_head", agg.head())
                         print("time_diff_tail", agg.tail())
