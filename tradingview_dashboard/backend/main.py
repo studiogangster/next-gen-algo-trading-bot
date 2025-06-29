@@ -215,6 +215,143 @@ def _get_candles(
     return {"candles": result}
 
 
+@app.get("/indicators")
+def get_indicators(
+    instrument_token: int,
+    timeframe: str,
+    start: int = Query(..., description="Start timestamp (epoch seconds)"),
+    end: int = Query(..., description="End timestamp (epoch seconds)"),
+    limit: int = Query(100, description="Max number of candles to use"),
+):
+    """
+    Compute all supported indicators for a given instrument and timeframe, on-the-fly.
+    Returns a generic, extensible array of indicator results for UI visualization.
+    """
+    import yaml
+    import os
+
+    # Load supported indicators from config/config.yaml if available
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config", "config.yaml")
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+        indicators = config.get("indicators", [
+            {"type": "ema", "params": {"length": 20}},
+            {"type": "rsi", "params": {"length": 14}},
+            {"type": "kc", "params": {"length": 20, "multiplier": 2}},
+        ])
+    else:
+        indicators = [
+            {"type": "ema", "params": {"length": 20}},
+            {"type": "rsi", "params": {"length": 14}},
+            {"type": "kc", "params": {"length": 20, "multiplier": 2}},
+        ]
+
+    client: Redis = get_redis_client()
+    from_ts = str(start) if start >= 0 else "-"
+    to_ts = str(end) if end >= 0 else "+"
+
+    # Compose label filter
+    label_filter = [
+        f"type=ohlc",
+        f"instrument_token={instrument_token}",
+        f"timeframe={timeframe}"
+    ]
+
+    try:
+        query = ["TS.MREVRANGE", from_ts, to_ts, "COUNT", 500, "FILTER", *label_filter]
+        result = client.execute_command(*query)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Redis MRANGE error: {str(e)}")
+
+    # Parse MRANGE result
+    field_data: Dict[str, Dict[int, float]] = {}
+    for entry in result:
+        key, labels, data = entry
+        key = key.split(":")[-1]
+        if key:
+            field_data[key] = {int(ts): float(val) for ts, val in data}
+
+    expected_fields = {"open", "high", "low", "close", "volume"}
+    if not expected_fields.issubset(field_data.keys()):
+        raise HTTPException(status_code=404, detail=f"Missing one or more OHLC fields")
+
+    # Intersect timestamps to build complete candles
+    common_ts = set.intersection(*(set(fd.keys()) for fd in field_data.values()))
+    sorted_ts = sorted(common_ts)[-limit:] if limit > 0 else sorted(common_ts)
+
+    # Build DataFrame
+    df = pd.DataFrame({
+        "timestamp": sorted_ts,
+        "open": [field_data["open"][ts] for ts in sorted_ts],
+        "high": [field_data["high"][ts] for ts in sorted_ts],
+        "low": [field_data["low"][ts] for ts in sorted_ts],
+        "close": [field_data["close"][ts] for ts in sorted_ts],
+        "volume": [field_data["volume"][ts] for ts in sorted_ts],
+    }).set_index("timestamp")
+
+    indicator_results = []
+    for ind in indicators:
+        ind_type = ind.get("type")
+        params = ind.get("params", {})
+        try:
+            if ind_type == "kc":
+                kc = ta.kc(df["high"], df["low"], df["close"], **params)
+                if kc is not None and not kc.empty:
+                    columns = list(kc.columns)
+                    values = []
+                    for ts, row in kc.iterrows():
+                        entry = {"timestamp": int(ts)}
+                        for col in columns:
+                            entry[col.lower()] = float(row[col]) if pd.notna(row[col]) else None
+                        values.append(entry)
+                    indicator_results.append({
+                        "name": ind_type,
+                        "params": params,
+                        "columns": [c.lower() for c in columns],
+                        "values": values,
+                    })
+            elif hasattr(ta, ind_type):
+                func = getattr(ta, ind_type)
+                result = func(df["close"], **params)
+                if result is not None:
+                    if isinstance(result, pd.DataFrame):
+                        columns = list(result.columns)
+                        values = []
+                        for ts, row in result.iterrows():
+                            entry = {"timestamp": int(ts)}
+                            for col in columns:
+                                entry[col.lower()] = float(row[col]) if pd.notna(row[col]) else None
+                            values.append(entry)
+                        indicator_results.append({
+                            "name": ind_type,
+                            "params": params,
+                            "columns": [c.lower() for c in columns],
+                            "values": values,
+                        })
+                    else:
+                        # Series
+                        values = [
+                            {"timestamp": int(ts), "value": float(val) if pd.notna(val) else None}
+                            for ts, val in result.items()
+                        ]
+                        indicator_results.append({
+                            "name": ind_type,
+                            "params": params,
+                            "columns": ["value"],
+                            "values": values,
+                        })
+        except Exception as e:
+            indicator_results.append({
+                "name": ind_type,
+                "params": params,
+                "columns": [],
+                "values": [],
+                "error": str(e),
+            })
+
+    return {"indicators": indicator_results}
+
 @app.get("/candles/latest")
 def get_latest_common_timestamp(instrument_token: int, timeframe: str):
     """

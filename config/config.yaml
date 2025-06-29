@@ -48,3 +48,18 @@ strategies:
 
 dry_run: true
 max_workers: 4
+
+indicators:
+  - type: "ema"
+    params:
+      length: 20
+  - type: "rsi"
+    params:
+      length: 14
+  - type: "kc"
+    params:
+      length: 20
+      multiplier: 2
+  - type: "sma"
+    params:
+      length: 50
