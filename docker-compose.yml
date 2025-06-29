@@ -12,9 +12,6 @@ services:
     environment:
       - REDIS_ARGS=--appendonly yes --appendfsync everysec --protected-mode no
     # command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--protected-mode" , "no"]
-
-
-
   redis-insight:
     image: redis/redisinsight:latest
     restart: always
@@ -23,15 +20,44 @@ services:
     volumes:
       - redis-insight:/data
 
-  # realtime-data:
-  #   build: ./realtime-data
-  #   volumes:
-  #     - ./.data:/usr/app/scrapped_data
-  #     - ./realtime-data/main.js:/usr/app/main.js
-  #   depends_on:
-  #     - redis
+  trading-engine:
+    image: python:3.10
+    container_name: trading-engine
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: /bin/bash -c "pip install uv && uv run python -m cli.main start --config-path config/config.yaml"
+    depends_on:
+      - redis
+    environment:
+      - PYTHONUNBUFFERED=1
 
-    
+  backend:
+    image: python:3.10
+    container_name: backend
+    working_dir: /app
+    volumes:
+      - ./app/tradingview_dashboard/backend:/app
+    command: /bin/bash -c "pip install pipx && pipx install . && uvicorn main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  frontend:
+    image: node:20
+    container_name: frontend
+    working_dir: /app
+    volumes:
+      - ./app/tradingview_dashboard/frontend:/app
+    command: /bin/bash -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    environment:
+      - NODE_ENV=development
+
 volumes:
   redis-insight:
   redis-data:
