@@ -21,38 +21,31 @@ const mainSeries = ref(null)
 const indicatorSeries = ref([])
 
 const instrumentToken = ref(256265) // Default: NIFTY
-const timeframe = ref('1m')
+const selectedTimeframes = ref(['1m']) // Default: 1m, multi-select
 const apiBase = 'http://localhost:8000' // adjust if needed
 
-const candles = ref([])
-const indicators = ref([])
+const chartStates = ref([]) // [{ timeframe, candles, indicators, chart, mainSeries, indicatorSeries }]
 
-function fetchCandles() {
+async function fetchCandlesForTimeframe(tf) {
   const now = Math.floor(Date.now() / 1000)
   const start = now - 60 * 60 * 6 * 20 // last 6 hours
   const end = now
-  return fetch(
-    `${apiBase}/candles?instrument_token=${instrumentToken.value}&timeframe=${timeframe.value}&start=${start}&end=${end}&limit=2000`
+  const res = await fetch(
+    `${apiBase}/candles?instrument_token=${instrumentToken.value}&timeframe=${tf}&start=${start}&end=${end}&limit=2000`
   )
-    .then(res => res.json())
-    .then(data => {
-      candles.value = data.candles || []
-      return candles.value
-    })
+  const data = await res.json()
+  return data.candles || []
 }
 
-function fetchIndicators() {
+async function fetchIndicatorsForTimeframe(tf) {
   const now = Math.floor(Date.now() / 1000)
   const start = now - 60 * 60 * 6 // last 6 hours
   const end = now
-  return fetch(
-    `${apiBase}/indicators?instrument_token=${instrumentToken.value}&timeframe=${timeframe.value}&start=${start}&end=${end}&limit=200`
+  const res = await fetch(
+    `${apiBase}/indicators?instrument_token=${instrumentToken.value}&timeframe=${tf}&start=${start}&end=${end}&limit=200`
   )
-    .then(res => res.json())
-    .then(data => {
-      indicators.value = data.indicators || []
-      return indicators.value
-    })
+  const data = await res.json()
+  return data.indicators || []
 }
 
 
@@ -223,184 +216,165 @@ function drawHoverPriceLines(candle) {
 }
 
 
-function renderChart() {
-  if (!chartContainer.value) return
-  // Remove previous chart if exists
-  if (chart.value) {
-    chart.value.remove()
-    chart.value = null
-  }
-  chart.value = createChart(chartContainer.value, {
-    width: chartContainer.value.clientWidth,
-    height: chartContainer.value.clientHeight,
-    layout: { background: { color: '#fff' }, textColor: '#222' },
-    grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
-    timeScale: {
-      timeVisible: true,
-      secondsVisible: false,
-      tickMarkFormatter: (timestamp) => {
-
-        // timestamp is in seconds
-        const date = new Date(timestamp * 1000)
-        const istString = date.toLocaleString('en-IN', {
-          timeZone: 'Asia/Kolkata',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false
-        })
-        // For debug: log a sample conversion
-        if (timestamp % 3600 === 0) {
-          console.log('IST tick label for', timestamp, 'is', istString)
-        }
-        return istString;
-      },
-      timeFormatter: (timestamp) => {
-        // const date = new Date(timestamp * 1000);
-        const date = new Date((timestamp + 330 * 60) * 1000); // IST offset
-        const istString = date.toLocaleString('en-IN', {
-          timeZone: 'Asia/Kolkata',
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false
-        })
-        return istString;
-      }
-    },
-    rightPriceScale: {
-      scaleMargins: { top: 0.1, bottom: 0.1 },
-      borderVisible: true,
-    },
-  })
-
-  mainSeries.value = chart.value.addSeries(CandlestickSeries, {})
-  // Debug: log last candle timestamp and conversions
-  if (candles.value.length > 0) {
-    const last = candles.value[candles.value.length - 1];
-    const ts = last.epoch !== undefined ? Number(last.epoch) : Math.floor(last.timestamp);
-    const utc = new Date(ts * 1000).toUTCString();
-    const ist = new Date(ts * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-    console.log('Last candle timestamp:', ts, 'UTC:', utc, 'IST:', ist);
-  }
-  mainSeries.value.setData(
-    candles.value.map(c => ({
-      // time: c.epoch !== undefined ? Number(c.epoch) : Math.floor(c.timestamp),
-      // time: convertISTToUTC("2025-06-29T09:15:00+05:30"),
-      // time: ist,
-      time: c.timestamp,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }))
-  )
-
-  // drawLastCandlePriceLines()
-
-  indicatorSeries.value = []
-  indicators.value.forEach((ind, idx) => {
-    if (ind.values && ind.values.length > 0) {
-      indicatorSeries.value.push(...addIndicatorToChart(chart.value, ind))
-    }
-  })
-
-  // Custom crosshair tooltip for IST
-  chart.value.subscribeCrosshairMove(param => {
-    if (!param || !param.time || !param.point) {
-      tooltip.value.visible = false
-      return
-    }
-    const ts = typeof param.time === 'object' && param.time.unix ? param.time.unix : param.time
-    // const date = new Date(ts * 1000);
-    const date = new Date((ts + 330 * 60) * 1000); // IST offset
-
-    const istString = date.toLocaleString('en-IN', {
-      timeZone: 'Asia/Kolkata',
-      year: '2-digit',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    })
-
-
-
-    for (let [series, data] of param.seriesData) {
-
-      if (!data) {
-        drawHoverPriceLines(null);
-        return;
-      }
-
-      drawHoverPriceLines(data);
-      const { high, low, close, open } = data;
-
-      tooltip.value = {
-        visible: true,
-        text: `High ${high}<br>Low ${low}<br>Close ${close}<br>Open ${open}`,
-        style: {
-          position: 'absolute',
-          left: (param.point.x + 20) + 'px',
-          top: (param.point.y + 40) + 'px',
-          background: '#fff',
-          border: '1px solid #888',
-          padding: '6px 10px',
-          borderRadius: '6px',
-          pointerEvents: 'none',
-          zIndex: 1000,
-          fontSize: '13px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-        }
-      }
-
-    }
-
-    return;
-    tooltip.value = {
-      visible: true,
-      text: istString,
-      style: {
-        position: 'absolute',
-        left: (param.point.x + 20) + 'px',
-        top: (param.point.y + 40) + 'px',
-        background: '#fff',
-        border: '1px solid #888',
-        padding: '6px 10px',
-        borderRadius: '6px',
-        pointerEvents: 'none',
-        zIndex: 1000,
-        fontSize: '13px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-      }
-    }
-  })
+function getChartLayout(n) {
+  // Returns {rows, cols} for n charts
+  if (n === 1) return { rows: 1, cols: 1 }
+  if (n === 2) return { rows: 1, cols: 2 }
+  if (n === 3 || n === 4) return { rows: 2, cols: 2 }
+  return { rows: 1, cols: n }
 }
 
-async function loadDataAndRender() {
-  await fetchCandles()
-  await fetchIndicators()
-  renderChart()
+async function loadDataAndRenderMulti() {
+  // Remove previous chart states
+  chartStates.value.forEach(state => {
+    if (state.chart) state.chart.remove()
+  })
+  chartStates.value = []
+
+  for (const tf of selectedTimeframes.value) {
+    const candles = await fetchCandlesForTimeframe(tf)
+    const indicators = await fetchIndicatorsForTimeframe(tf)
+    chartStates.value.push({
+      timeframe: tf,
+      candles,
+      indicators,
+      chart: null,
+      mainSeries: null,
+      indicatorSeries: indicatorSeries
+    })
+  }
+
+  // Render charts after DOM update
+  setTimeout(() => {
+    // --- Synchronization state ---
+    let isSyncingTimeRange = false
+    let isSyncingCrosshair = false
+    let lastTimeRange = null
+    let lastCrosshair = null
+
+    chartStates.value.forEach((state, idx) => {
+      const container = document.getElementById(`chart-container-${state.timeframe}`)
+      if (!container) return
+      // Ensure the container has width/height
+      container.style.width = "100%";
+      container.style.height = "100%";
+      const chart = createChart(container, {
+        width: container.clientWidth,
+        height: container.clientHeight,
+        layout: { background: { color: '#fff' }, textColor: '#222' },
+        grid: { vertLines: { color: '#eee' }, horzLines: { color: '#eee' } },
+        timeScale: {
+          timeVisible: true,
+          secondsVisible: false,
+          tickMarkFormatter: (timestamp) => {
+            const date = new Date(timestamp * 1000)
+            const istString = date.toLocaleString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            })
+            return istString;
+          },
+          timeFormatter: (timestamp) => {
+            const date = new Date((timestamp + 330 * 60) * 1000); // IST offset
+            const istString = date.toLocaleString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            })
+            return istString;
+          }
+        },
+        rightPriceScale: {
+          scaleMargins: { top: 0.1, bottom: 0.1 },
+          borderVisible: true,
+        },
+      })
+      state.chart = chart
+      state.mainSeries = chart.addSeries(CandlestickSeries, {})
+      if (state.candles.length > 0) {
+        const first = state.candles[0];
+        console.log('First candle for', state.timeframe, 'timestamp:', first.timestamp, 'type:', typeof first.timestamp);
+      }
+      state.mainSeries.setData(
+        state.candles.map(c => ({
+          time: typeof c.timestamp === 'string' ? Math.floor(new Date(c.timestamp).getTime() / 1000) : Number(c.timestamp),
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        }))
+      )
+      state.indicatorSeries = []
+      state.indicators.forEach((ind, idx) => {
+        if (ind.values && ind.values.length > 0) {
+          state.indicatorSeries.push(...addIndicatorToChart(chart, ind))
+        }
+      })
+
+      // --- Time range sync ---
+      chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+        if (isSyncingTimeRange) return
+        isSyncingTimeRange = true
+        lastTimeRange = range
+        chartStates.value.forEach((other, j) => {
+          if (j !== idx && other.chart && range) {
+            other.chart.timeScale().setVisibleRange(range)
+          }
+        })
+        isSyncingTimeRange = false
+      })
+
+      // --- Crosshair sync ---
+      chart.subscribeCrosshairMove((param) => {
+        if (isSyncingCrosshair) return
+        if (!param || !param.time) return
+        isSyncingCrosshair = true
+        lastCrosshair = param.time
+        chartStates.value.forEach((other, j) => {
+          if (j !== idx && other.chart && param.time) {
+            other.chart.crosshair().moveTo(param.time, undefined)
+          }
+        })
+        isSyncingCrosshair = false
+      })
+    })
+  }, 0)
 }
 
 onMounted(async () => {
-  await loadDataAndRender()
-  window.addEventListener('resize', renderChart)
+  await loadDataAndRenderMulti()
+  window.addEventListener('resize', loadDataAndRenderMulti)
 })
 
-watch([instrumentToken, timeframe], async () => {
-  await loadDataAndRender()
+watch([instrumentToken, selectedTimeframes], async () => {
+  await loadDataAndRenderMulti()
 })
 
 </script>
 
 <template>
   <div class="app-vertical-layout">
-    <!-- Top: Chart (50vh) -->
-    <div class="chart-section" ref="chartContainer">
-      <div 
-      v-html="tooltip.text" 
-      v-if="tooltip.visible" :style="tooltip.style" class="custom-tooltip">
-
+    <!-- Multi-chart split layout -->
+    <div
+      class="multi-chart-section"
+      :style="{
+        gridTemplateRows: `repeat(${getChartLayout(selectedTimeframes.length).rows}, 1fr)`,
+        gridTemplateColumns: `repeat(${getChartLayout(selectedTimeframes.length).cols}, 1fr)`
+      }"
+    >
+      <div
+        v-for="(tf, idx) in selectedTimeframes"
+        :key="tf"
+        class="chart-cell"
+      >
+        <div class="chart-title">{{ tf }} Chart</div>
+        <div
+          class="chart-inner-container"
+          :id="`chart-container-${tf}`"
+        ></div>
       </div>
     </div>
     <!-- Bottom: Tools area (blank for now) -->
@@ -417,12 +391,23 @@ watch([instrumentToken, timeframe], async () => {
           </select>
         </label>
         <label>
-          Timeframe:
-          <select v-model="timeframe">
-            <option v-for="opt in timeframeOptions" :key="opt.value" :value="opt.value">
+          Timeframes:
+          <select
+            v-model="selectedTimeframes"
+            multiple
+            :size="timeframeOptions.length"
+            style="min-width: 120px; max-width: 180px;"
+          >
+            <option
+              v-for="opt in timeframeOptions"
+              :key="opt.value"
+              :value="opt.value"
+              :disabled="selectedTimeframes.length >= 4 && !selectedTimeframes.includes(opt.value)"
+            >
               {{ opt.label }}
             </option>
           </select>
+          <span class="tf-hint">(max 4)</span>
         </label>
       </div>
     </nav>
@@ -441,12 +426,53 @@ watch([instrumentToken, timeframe], async () => {
   background: #f8f9fa;
 }
 
-.chart-section {
+.multi-chart-section {
+  display: grid;
   width: 100vw;
-  height: 50vh;
-  min-height: 250px;
+  height: 60vh;
+  min-height: 300px;
   background: #fff;
   border-bottom: 1px solid #e0e0e0;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 1;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+.chart-cell {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  position: relative;
+  min-width: 0;
+  min-height: 200px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+}
+
+.chart-inner-container {
+  flex: 1 1 0%;
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+}
+
+.chart-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1976d2;
+  padding: 0.25rem 0.5rem;
+  background: #f4f6f8;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.tools-section {
+  width: 100vw;
+  height: 35vh;
+  background: #f4f6f8;
   box-sizing: border-box;
   position: relative;
   z-index: 1;
@@ -507,5 +533,11 @@ select {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   z-index: 1000;
   position: absolute;
+}
+
+.tf-hint {
+  font-size: 0.9em;
+  color: #888;
+  margin-left: 0.5em;
 }
 </style>
