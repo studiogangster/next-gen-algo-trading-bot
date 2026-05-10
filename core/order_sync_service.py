@@ -1,4 +1,5 @@
 import json
+import os
 import time
 import traceback
 from typing import Type
@@ -18,7 +19,9 @@ def run_order_sync_loop(
     """
     redis_client = get_redis_client()
     response = login()
-    user_id = response["user_id"]
+    user_id = str(response.get("user_id") or os.getenv("USERID") or "").strip()
+    if not user_id:
+        raise RuntimeError("Could not resolve broker user_id from login response or USERID env.")
     broker = broker_cls()
 
     while True:

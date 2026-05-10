@@ -27,13 +27,15 @@ services:
     container_name: candle-sync
     working_dir: /app
     shm_size: "2gb"
+    volumes:
+      - token-cache:/cache
     command: python -m cli.main start --config-path config/config.yaml
     depends_on:
       - redis
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
-      - TOKEN_CACHE_FILE=/tmp/.keystore.json
+      - TOKEN_CACHE_FILE=/cache/keystore.json
       - ENGINE_ENABLE_ORDER_SYNC=0
       - ENGINE_ENABLE_SYMBOL_SYNC=1
       - ENGINE_ENABLE_INDICATOR_SYNC=0
@@ -54,13 +56,15 @@ services:
     container_name: indicator-sync
     working_dir: /app
     shm_size: "2gb"
+    volumes:
+      - token-cache:/cache
     command: python -m cli.main start --config-path config/config.yaml
     depends_on:
       - redis
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
-      - TOKEN_CACHE_FILE=/tmp/.keystore.json
+      - TOKEN_CACHE_FILE=/cache/keystore.json
       - ENGINE_ENABLE_ORDER_SYNC=0
       - ENGINE_ENABLE_SYMBOL_SYNC=0
       - ENGINE_ENABLE_INDICATOR_SYNC=1
@@ -80,13 +84,15 @@ services:
       dockerfile: docker/Dockerfile.runtime
     container_name: order-sync
     working_dir: /app
+    volumes:
+      - token-cache:/cache
     command: python -m cli.main start-order-sync --config-path config/config.yaml --poll-interval 0.5
     depends_on:
       - redis
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
-      - TOKEN_CACHE_FILE=/tmp/.keystore.json
+      - TOKEN_CACHE_FILE=/cache/keystore.json
 
   backend:
     image: ngat-runtime:latest
@@ -127,3 +133,4 @@ services:
 volumes:
   redis-insight:
   redis-data:
+  token-cache:

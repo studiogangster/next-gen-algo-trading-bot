@@ -73,9 +73,12 @@ class ZerodhaBroker:
                 _self._login()
 
             def increment(_self, *args, **kwargs):
+                # Re-auth only on auth failures to avoid login thrash on generic retries.
+                response = kwargs.get("response")
+                status = getattr(response, "status", None)
                 print("login_attempt", args)
-                _self._login()
-                
+                if status in (401, 403):
+                    _self._login()
                 return super().increment(*args, **kwargs)
         
         # Define your retry strategy
@@ -89,7 +92,6 @@ class ZerodhaBroker:
         # Mount the retry strategy to the session
         adapter = HTTPAdapter(max_retries=retry_strategy)
         
-        self.enctoken = login()["enctoken"]
         self.session = requests.session()
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)

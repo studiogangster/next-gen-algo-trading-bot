@@ -192,7 +192,9 @@ class OrderAndPositionWorker:
     def start(self):
 
         response = login()
-        user_id = response["user_id"]
+        user_id = str(response.get("user_id") or os.getenv("USERID") or "").strip()
+        if not user_id:
+            raise RuntimeError("Could not resolve broker user_id from login response or USERID env.")
         self.broker = self.broker()
 
         while True:

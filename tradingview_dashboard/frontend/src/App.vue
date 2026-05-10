@@ -23,6 +23,15 @@ const timeframeSeconds = {
   '1h': 3600,
 }
 
+function sortTimeframesByGranularity(frames) {
+  return [...frames].sort((a, b) => (timeframeSeconds[a] || Number.MAX_SAFE_INTEGER) - (timeframeSeconds[b] || Number.MAX_SAFE_INTEGER))
+}
+
+function getPrimaryTimeframe(frames) {
+  const sorted = sortTimeframesByGranularity(frames)
+  return sorted[0] || '1m'
+}
+
 const apiBase = 'http://localhost:8000'
 const REALTIME_POLL_MS = 2000
 const INDICATOR_POLL_MS = 5000
@@ -100,6 +109,9 @@ let orderBookTimer = null
 let orderBookPollInFlight = false
 let syncingLogicalRange = false
 let syncingTimeRange = false
+let reloadQueued = false
+let reloadDebounceTimer = null
+let latestLoadRequestId = 0
 
 const activeInstrument = computed(() => {
   const fromPreset = instrumentOptions.find((option) => option.value === instrumentToken.value)
@@ -1629,12 +1641,15 @@ async function refreshRealtimeCandles() {
   }
 
   let hadSuccess = false
+  const frames = chartStates.value.map((state) => state.timeframe)
+  const primaryTf = getPrimaryTimeframe(frames)
+  const anchorLatest = await fetchLatestTimestamp(primaryTf)
+  if (!anchorLatest) return
 
   for (const state of chartStates.value) {
     try {
       const tfSec = timeframeSeconds[state.timeframe] || 60
-      const latestTs = await fetchLatestTimestamp(state.timeframe)
-      if (!latestTs) continue
+      const latestTs = anchorLatest
 
       const lastTs = state.candles.length
         ? normalizeTimestamp(state.candles[state.candles.length - 1].timestamp)
@@ -1695,6 +1710,12 @@ async function refreshIndicators() {
 }
 
 async function loadDataAndRenderMulti() {
+  if (isReloading.value) {
+    reloadQueued = true
+    return
+  }
+  const requestId = ++latestLoadRequestId
+
   isReloading.value = true
   uiError.value = ''
   stopPolling()
@@ -1702,7 +1723,10 @@ async function loadDataAndRenderMulti() {
   chartStates.value = []
 
   try {
-    const targetFrames = selectedTimeframes.value.slice(0, 4)
+    const targetFrames = [...new Set(selectedTimeframes.value)].slice(0, 4)
+    if (targetFrames.length !== selectedTimeframes.value.length) {
+      selectedTimeframes.value = targetFrames
+    }
 
     if (targetFrames.length === 0) {
       selectedTimeframes.value = ['1m']
@@ -1711,17 +1735,21 @@ async function loadDataAndRenderMulti() {
 
     connectionState.value = 'syncing'
 
-    for (const timeframe of targetFrames) {
+    const sortedTargetFrames = sortTimeframesByGranularity(targetFrames)
+    const primaryTf = getPrimaryTimeframe(sortedTargetFrames)
+    const primaryLatestTs = await fetchLatestTimestamp(primaryTf)
+
+    const nextStates = []
+    for (const timeframe of sortedTargetFrames) {
+      if (requestId !== latestLoadRequestId) return
       const now = Math.floor(Date.now() / 1000)
       const tfSec = timeframeSeconds[timeframe] || 60
-      const latestTs = await fetchLatestTimestamp(timeframe)
 
       const fromEpoch = useFullRange.value ? null : parseLocalDateTimeInput(rangeFromInput.value)
       const toEpoch = useFullRange.value ? null : parseLocalDateTimeInput(rangeToInput.value)
 
-      const fallbackEnd = latestTs || now
-      let initialEnd = toEpoch !== null ? toEpoch : fallbackEnd
-      if (latestTs !== null) initialEnd = Math.min(initialEnd, latestTs)
+      const fallbackEnd = primaryLatestTs || now
+      const initialEnd = toEpoch !== null ? Math.min(toEpoch, fallbackEnd) : fallbackEnd
 
       const initialStart = fromEpoch !== null ? fromEpoch : Math.max(0, initialEnd - tfSec * HISTORY_PAGE_LIMIT)
       const normalizedStart = Math.min(initialStart, initialEnd)
@@ -1737,7 +1765,7 @@ async function loadDataAndRenderMulti() {
       const indicators = bundle.indicators || []
       const signals = bundle.signals || []
 
-      chartStates.value.push({
+      nextStates.push({
         timeframe,
         candles,
         indicators,
@@ -1763,7 +1791,11 @@ async function loadDataAndRenderMulti() {
       })
     }
 
+    if (requestId !== latestLoadRequestId) return
+    chartStates.value = nextStates
+
     await nextTick()
+    if (requestId !== latestLoadRequestId) return
 
     chartStates.value.forEach((state, index) => {
       const container = document.getElementById(`chart-container-${state.timeframe}`)
@@ -1903,15 +1935,32 @@ async function loadDataAndRenderMulti() {
       }
     }
 
-    connectionState.value = 'online'
-    lastSyncTs.value = Math.floor(Date.now() / 1000)
-    startPolling()
+    if (requestId === latestLoadRequestId) {
+      connectionState.value = 'online'
+      lastSyncTs.value = Math.floor(Date.now() / 1000)
+      startPolling()
+    }
   } catch (error) {
     connectionState.value = 'degraded'
     uiError.value = error.message || 'Failed to load dashboard data.'
   } finally {
-    isReloading.value = false
+    if (requestId === latestLoadRequestId) {
+      isReloading.value = false
+    }
+    if (reloadQueued) {
+      reloadQueued = false
+      // Run one more pass with the latest UI state after rapid toggles.
+      loadDataAndRenderMulti()
+    }
   }
+}
+
+function scheduleReload(delayMs = 120) {
+  if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer)
+  reloadDebounceTimer = setTimeout(() => {
+    reloadDebounceTimer = null
+    loadDataAndRenderMulti()
+  }, delayMs)
 }
 
 async function applyTimeRange() {
@@ -1947,6 +1996,10 @@ function selectInstrument(value) {
 }
 
 function manualRefresh() {
+  if (reloadDebounceTimer) {
+    clearTimeout(reloadDebounceTimer)
+    reloadDebounceTimer = null
+  }
   loadDataAndRenderMulti()
 }
 
@@ -1955,6 +2008,10 @@ function toggleQuickIndicatorMenu() {
 }
 
 async function quickRefreshOps() {
+  if (reloadDebounceTimer) {
+    clearTimeout(reloadDebounceTimer)
+    reloadDebounceTimer = null
+  }
   await Promise.all([loadDataAndRenderMulti(), refreshOrderBooks()])
 }
 
@@ -2055,18 +2112,20 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopPolling()
+  if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer)
+  reloadDebounceTimer = null
   window.removeEventListener('resize', resizeCharts)
   removeAllCharts()
 })
 
 watch([instrumentToken, selectedTimeframes, useFullRange], async () => {
   if (!isBootstrapped.value) return
-  await loadDataAndRenderMulti()
+  scheduleReload(120)
 })
 
 watch(activeSignalStrategy, async () => {
   if (!isBootstrapped.value) return
-  await loadDataAndRenderMulti()
+  scheduleReload(120)
 })
 
 watch(

@@ -64,6 +64,11 @@ def login(username=None, password=None, otp_salt=None):
         password = os.environ.get("PASSWORD")
     if otp_salt is None:
         otp_salt = os.environ.get("OTP_SALT")
+
+    if not username or not password or not otp_salt:
+        raise ValueError(
+            "Missing broker credentials. Ensure USERID, PASSWORD, and OTP_SALT are set."
+        )
     
     # insulated position  / order data
     
@@ -84,6 +89,9 @@ def login(username=None, password=None, otp_salt=None):
 
     data = response.json()
     login_result = login2fa(username, data["data"]["request_id"], otp_salt)
+    # Normalize response shape so callers can reliably read user_id in both
+    # cached-login and full-login paths.
+    login_result["user_id"] = username
 
     # Persist token
     if "enctoken" in login_result:
