@@ -38,6 +38,7 @@ const chartStates = ref([])
 const signalStrategies = ref([])
 const activeSignalStrategy = ref('')
 const indicatorVisibility = ref({})
+const isQuickIndicatorMenuOpen = ref(false)
 const signalOutcomeScope = ref('today')
 const selectedSignalOutcomeDay = ref('')
 
@@ -97,6 +98,8 @@ let realtimeTimer = null
 let indicatorTimer = null
 let orderBookTimer = null
 let orderBookPollInFlight = false
+let syncingLogicalRange = false
+let syncingTimeRange = false
 
 const activeInstrument = computed(() => {
   const fromPreset = instrumentOptions.find((option) => option.value === instrumentToken.value)
@@ -1521,6 +1524,34 @@ function stopPolling() {
   orderBookTimer = null
 }
 
+function syncLogicalRangeAcrossCharts(sourceIndex, logicalRange) {
+  if (!logicalRange || syncingLogicalRange) return
+  syncingLogicalRange = true
+  try {
+    chartStates.value.forEach((otherState, otherIndex) => {
+      if (otherIndex === sourceIndex || !otherState.chart) return
+      otherState.chart.timeScale().setVisibleLogicalRange(logicalRange)
+    })
+  } finally {
+    syncingLogicalRange = false
+  }
+}
+
+function syncTimeRangeAcrossCharts(sourceIndex, timeRange) {
+  if (!timeRange || syncingTimeRange) return
+  syncingTimeRange = true
+  try {
+    chartStates.value.forEach((otherState, otherIndex) => {
+      if (otherIndex === sourceIndex || !otherState.chart) return
+      otherState.chart.timeScale().setVisibleRange(timeRange)
+      otherState.visibleFrom = timeRange.from
+      otherState.visibleTo = timeRange.to
+    })
+  } finally {
+    syncingTimeRange = false
+  }
+}
+
 function startPolling() {
   stopPolling()
   realtimeTimer = setInterval(refreshRealtimeCandles, REALTIME_POLL_MS)
@@ -1734,8 +1765,6 @@ async function loadDataAndRenderMulti() {
 
     await nextTick()
 
-    let syncingRange = false
-
     chartStates.value.forEach((state, index) => {
       const container = document.getElementById(`chart-container-${state.timeframe}`)
       if (!container) return
@@ -1837,21 +1866,18 @@ async function loadDataAndRenderMulti() {
         state.visibleTo = initialVisible.to
       }
 
+      chart.timeScale().subscribeVisibleLogicalRangeChange((logicalRange) => {
+        if (!logicalRange) return
+        syncLogicalRangeAcrossCharts(index, logicalRange)
+      })
+
       chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
         if (!range) return
 
         state.visibleFrom = range.from
         state.visibleTo = range.to
 
-        if (!syncingRange) {
-          syncingRange = true
-          chartStates.value.forEach((otherState, otherIndex) => {
-            if (otherIndex !== index && otherState.chart) {
-              otherState.chart.timeScale().setVisibleRange(range)
-            }
-          })
-          syncingRange = false
-        }
+        syncTimeRangeAcrossCharts(index, range)
 
         const oldest = state.candles.length ? normalizeTimestamp(state.candles[0].timestamp) : null
         if (oldest !== null && range.from <= oldest + (timeframeSeconds[state.timeframe] || 60) * 20) {
@@ -1859,6 +1885,23 @@ async function loadDataAndRenderMulti() {
         }
       })
     })
+
+    const primary = chartStates.value.find((state) => state.chart)
+    if (primary?.chart) {
+      const primaryLogicalRange = primary.chart.timeScale().getVisibleLogicalRange()
+      if (primaryLogicalRange) {
+        syncLogicalRangeAcrossCharts(-1, primaryLogicalRange)
+      }
+
+      const primaryTimeRange = primary.chart.timeScale().getVisibleRange()
+      if (primaryTimeRange) {
+        chartStates.value.forEach((state) => {
+          state.visibleFrom = primaryTimeRange.from
+          state.visibleTo = primaryTimeRange.to
+        })
+        syncTimeRangeAcrossCharts(-1, primaryTimeRange)
+      }
+    }
 
     connectionState.value = 'online'
     lastSyncTs.value = Math.floor(Date.now() / 1000)
@@ -1907,6 +1950,14 @@ function manualRefresh() {
   loadDataAndRenderMulti()
 }
 
+function toggleQuickIndicatorMenu() {
+  isQuickIndicatorMenuOpen.value = !isQuickIndicatorMenuOpen.value
+}
+
+async function quickRefreshOps() {
+  await Promise.all([loadDataAndRenderMulti(), refreshOrderBooks()])
+}
+
 function toggleControlDrawer() {
   isControlDrawerOpen.value = !isControlDrawerOpen.value
 }
@@ -1922,6 +1973,7 @@ function toggleInsightWidth() {
 function closeDrawers() {
   isControlDrawerOpen.value = false
   isInsightDrawerOpen.value = false
+  isQuickIndicatorMenuOpen.value = false
 }
 
 function useUniverseInstrument(instrument) {
@@ -2058,6 +2110,87 @@ watch(availableSignalOutcomeDays, (days) => {
           <span class="micro-chip">Frames: {{ selectedTimeframes.length }}</span>
           <span class="micro-chip">Realtime: {{ Math.round(REALTIME_POLL_MS / 1000) }}s</span>
           <span class="micro-chip">Indicators: {{ Math.round(INDICATOR_POLL_MS / 1000) }}s</span>
+        </div>
+      </div>
+
+      <div class="quick-ops-bar">
+        <div class="quick-ops-group">
+          <span class="quick-ops-label">Symbol</span>
+          <select class="quick-ops-select" :value="instrumentToken" @change="selectInstrument(Number($event.target.value))">
+            <option v-for="instrument in instrumentOptions" :key="`quick-instrument-${instrument.value}`" :value="instrument.value">
+              {{ instrument.symbol }}
+            </option>
+          </select>
+        </div>
+
+        <div class="quick-ops-group">
+          <span class="quick-ops-label">Timeframe</span>
+          <div class="quick-ops-pills">
+            <button
+              v-for="tf in timeframeOptions"
+              :key="`quick-tf-${tf.value}`"
+              class="quick-ops-pill"
+              :class="{ active: selectedTimeframes.includes(tf.value) }"
+              :disabled="!selectedTimeframes.includes(tf.value) && selectedTimeframes.length >= 4"
+              @click="toggleTimeframe(tf.value)"
+            >
+              {{ tf.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="quick-ops-group quick-ops-indicators">
+          <button class="quick-ops-btn" @click="toggleQuickIndicatorMenu">
+            Indicators {{ enabledIndicatorCount }}/{{ indicatorCatalog.length }}
+          </button>
+          <div v-if="isQuickIndicatorMenuOpen" class="quick-indicator-menu">
+            <div class="quick-indicator-menu-head">
+              <strong>Indicator Toggles</strong>
+              <div class="pager-actions">
+                <button class="ghost-btn tiny" @click="setAllIndicatorsEnabled(true)">All</button>
+                <button class="ghost-btn tiny" @click="setAllIndicatorsEnabled(false)">None</button>
+              </div>
+            </div>
+            <div class="quick-indicator-list">
+              <label class="quick-indicator-row" v-for="item in indicatorCatalog" :key="`quick-ind-${item.name}`">
+                <input
+                  type="checkbox"
+                  :checked="isIndicatorEnabled(item.name)"
+                  @change="setIndicatorEnabled(item.name, $event.target.checked)"
+                />
+                <span>{{ item.name.toUpperCase() }}</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="quick-ops-group">
+          <span class="quick-ops-label">Signal</span>
+          <select class="quick-ops-select" v-model="activeSignalStrategy">
+            <option value="">All YAML Signals</option>
+            <option v-for="item in validSignalStrategies" :key="`quick-strategy-${item.name}`" :value="item.name">
+              {{ item.name }}
+            </option>
+          </select>
+        </div>
+
+        <div class="quick-ops-group">
+          <span class="quick-ops-label">P&amp;L Scope</span>
+          <select class="quick-ops-select" v-model="signalOutcomeScope">
+            <option value="today">Today</option>
+            <option value="day">Selected Day</option>
+            <option value="window">Window</option>
+          </select>
+          <select v-if="signalOutcomeScope === 'day'" class="quick-ops-select" v-model="selectedSignalOutcomeDay">
+            <option v-for="day in availableSignalOutcomeDays" :key="`quick-day-${day}`" :value="day">{{ day }}</option>
+          </select>
+        </div>
+
+        <div class="quick-ops-group quick-ops-actions">
+          <button class="quick-ops-btn" @click="quickRefreshOps">Refresh All</button>
+          <button class="quick-ops-btn" @click="refreshOrderBooks">Order Book</button>
+          <button class="quick-ops-btn" @click="toggleControlDrawer">Controls</button>
+          <button class="quick-ops-btn" @click="toggleInsightDrawer">Insights</button>
         </div>
       </div>
 
@@ -2821,6 +2954,119 @@ watch(availableSignalOutcomeDays, (days) => {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #9db5d4;
+}
+
+.quick-ops-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border-bottom: 1px solid #17263f;
+  background: rgba(7, 15, 28, 0.65);
+  position: relative;
+  z-index: 18;
+}
+
+.quick-ops-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quick-ops-label {
+  font-size: 0.6rem;
+  color: #8ea5c4;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.quick-ops-select {
+  border: 1px solid #2a3b58;
+  background: rgba(16, 26, 43, 0.9);
+  color: #dce8f7;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 0.68rem;
+}
+
+.quick-ops-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.quick-ops-pill,
+.quick-ops-btn {
+  border: 1px solid #2a3b58;
+  background: rgba(16, 26, 43, 0.88);
+  color: #dce8f7;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 0.66rem;
+  cursor: pointer;
+}
+
+.quick-ops-pill.active {
+  border-color: rgba(52, 211, 153, 0.7);
+  color: #bbf7d0;
+  background: rgba(7, 31, 24, 0.88);
+}
+
+.quick-ops-actions {
+  margin-left: auto;
+  gap: 6px;
+}
+
+.quick-ops-indicators {
+  position: relative;
+}
+
+.quick-indicator-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  max-width: 280px;
+  border: 1px solid #2a3b58;
+  border-radius: 10px;
+  background: rgba(8, 15, 28, 0.98);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.42);
+  padding: 8px;
+  z-index: 30;
+}
+
+.quick-indicator-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.quick-indicator-menu-head strong {
+  font-size: 0.68rem;
+  color: #b7cce7;
+}
+
+.quick-indicator-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 210px;
+  overflow: auto;
+}
+
+.quick-indicator-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #22304a;
+  border-radius: 7px;
+  background: rgba(19, 30, 48, 0.8);
+  padding: 4px 6px;
+  font-size: 0.66rem;
+  color: #dbeafe;
 }
 
 .field-label {
@@ -3871,6 +4117,10 @@ button {
 
   .header-right {
     justify-content: flex-start;
+  }
+
+  .quick-ops-actions {
+    margin-left: 0;
   }
 
   .edge-toggle {

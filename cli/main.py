@@ -180,6 +180,7 @@ def start(config_path: str = typer.Option("config/config.yaml", help="Path to co
         indicator_timeframes=sorted(set(settings.timeframes + settings.derived_timeframes)),
         indicator_poll_interval=1.0,
         timeframe_generator_poll_interval=env_float("ENGINE_TIMEFRAME_SYNC_POLL_INTERVAL", 5.0),
+        timeframe_max_1m_points_per_cycle=env_int("ENGINE_TIMEFRAME_MAX_1M_POINTS_PER_CYCLE", 1200),
         enable_order_sync_worker=env_bool("ENGINE_ENABLE_ORDER_SYNC", True),
         enable_symbol_workers=env_bool("ENGINE_ENABLE_SYMBOL_SYNC", True),
         enable_indicator_worker=env_bool("ENGINE_ENABLE_INDICATOR_SYNC", True),

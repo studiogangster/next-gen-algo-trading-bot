@@ -40,6 +40,7 @@ class EngineConfig:
         indicator_timeframes: Optional[List[str]] = None,
         indicator_poll_interval: float = 1.0,
         timeframe_generator_poll_interval: float = 5.0,
+        timeframe_max_1m_points_per_cycle: int = 3000,
         enable_order_sync_worker: bool = True,
         enable_symbol_workers: bool = True,
         enable_indicator_worker: bool = True,
@@ -64,6 +65,7 @@ class EngineConfig:
         self.indicator_timeframes = indicator_timeframes or []
         self.indicator_poll_interval = indicator_poll_interval
         self.timeframe_generator_poll_interval = timeframe_generator_poll_interval
+        self.timeframe_max_1m_points_per_cycle = int(timeframe_max_1m_points_per_cycle)
         self.enable_order_sync_worker = enable_order_sync_worker
         self.enable_symbol_workers = enable_symbol_workers
         self.enable_indicator_worker = enable_indicator_worker
@@ -288,6 +290,7 @@ class Engine:
             timeframe_cfg = SimpleNamespace(
                 symbols=self.config.symbols,
                 derived_timeframes=self.config.derived_timeframes,
+                max_1m_points_per_cycle=self.config.timeframe_max_1m_points_per_cycle,
             )
             timeframe_worker = TimeframeGeneratorWorker.remote(
                 config=timeframe_cfg,
