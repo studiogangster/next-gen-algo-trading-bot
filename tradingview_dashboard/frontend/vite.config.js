@@ -21,6 +21,41 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false
+      },
+      '/_candles': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/indicator': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/indicators': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/chart-data': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/signals': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/universe': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
+      },
+      '/accounts': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false
       }
     }
   }

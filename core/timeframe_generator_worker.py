@@ -113,20 +113,36 @@ class TimeframeGeneratorWorker:
                 last = int(info[idx + 1])
         return first, last
 
-    def _fetch_1m_df(self, symbol: str, start_ts: int, end_ts: int) -> pd.DataFrame:
+    def _fetch_1m_df(
+        self,
+        symbol: str,
+        start_ts: int,
+        end_ts: int,
+        max_points: Optional[int] = None,
+    ) -> pd.DataFrame:
         if start_ts > end_ts:
             return pd.DataFrame()
 
-        try:
-            rows = self.redis_client.execute_command(
-                "TS.MRANGE",
-                str(int(start_ts)),
-                str(int(end_ts)),
+        cmd = [
+            "TS.MRANGE",
+            str(int(start_ts)),
+            str(int(end_ts)),
+        ]
+        if max_points is not None and int(max_points) > 0:
+            # Limit by sample count (not wall-clock window) so backfill keeps
+            # progressing across weekends/holidays and other market-closed gaps.
+            cmd.extend(["COUNT", str(int(max_points))])
+        cmd.extend(
+            [
                 "FILTER",
                 "type=ohlc",
                 f"instrument_token={symbol}",
                 "timeframe=1m",
-            )
+            ]
+        )
+
+        try:
+            rows = self.redis_client.execute_command(*cmd)
         except Exception:
             return pd.DataFrame()
 
@@ -193,19 +209,21 @@ class TimeframeGeneratorWorker:
 
         _dst_first, dst_last = self._series_bounds(dst_key)
         tf_sec = timeframe_to_seconds(timeframe)
-        one_min_sec = 60
-
         if dst_last is None:
             start_ts = src_first
         else:
             # Recompute a small overlap window to fix late/updated source candles.
             start_ts = max(src_first, dst_last - (2 * tf_sec))
-        max_window_sec = max(one_min_sec, self.max_1m_points_per_cycle * one_min_sec)
-        end_ts = min(src_last, start_ts + max_window_sec)
+        end_ts = src_last
         if start_ts > end_ts:
             return {"rows": 0, "writes": 0}
 
-        df_1m = self._fetch_1m_df(symbol, start_ts, end_ts)
+        df_1m = self._fetch_1m_df(
+            symbol,
+            start_ts,
+            end_ts,
+            max_points=self.max_1m_points_per_cycle,
+        )
         if df_1m.empty:
             return {"rows": 0, "writes": 0}
 

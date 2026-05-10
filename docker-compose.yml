@@ -4,8 +4,6 @@ services:
     restart: always
     expose:
       - 6379
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
     environment:
@@ -14,8 +12,6 @@ services:
   redis-insight:
     image: redis/redisinsight:latest
     restart: always
-    ports:
-      - "5540:5540"
     volumes:
       - redis-insight:/data
 
@@ -131,8 +127,8 @@ services:
     container_name: backend
     working_dir: /app/tradingview_dashboard/backend
     command: uvicorn main:app --host 0.0.0.0 --port 8000
-    ports:
-      - "8000:8000"
+    expose:
+      - 8000
     depends_on:
       - redis
     environment:
@@ -141,23 +137,15 @@ services:
       - REDIS_URL=redis://redis:6379
       - INDICATORS_PRECOMPUTED_ONLY=1
 
-  # frontend:
-  #   image: node:20
-  #   container_name: frontend
-  #   working_dir: /
-  #   volumes:
-  #     - ./tradingview_dashboard/frontend:/src:ro
-  #   command: >-
-  #     /bin/bash -c "rm -rf /tmp/frontend-run &&
-  #     mkdir -p /tmp/frontend-run &&
-  #     cp -a /src/. /tmp/frontend-run/ &&
-  #     cd /tmp/frontend-run &&
-  #     npm install --no-audit --no-fund &&
-  #     npm run dev -- --host 0.0.0.0"
-  #   ports:
-  #     - "5173:5173"
-  #   environment:
-  #     - NODE_ENV=development
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.nginx
+    container_name: nginx
+    depends_on:
+      - backend
+    ports:
+      - "${NGINX_PORT:-80}:80"
 
 volumes:
   redis-insight:

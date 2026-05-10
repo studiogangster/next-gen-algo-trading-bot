@@ -32,7 +32,7 @@ function getPrimaryTimeframe(frames) {
   return sorted[0] || '1m'
 }
 
-const apiBase = 'http://localhost:8000'
+const apiBase = import.meta.env.VITE_API_BASE || ''
 const REALTIME_POLL_MS = 2000
 const INDICATOR_POLL_MS = 5000
 const ORDER_BOOK_POLL_MS = 2000
@@ -109,6 +109,10 @@ let orderBookTimer = null
 let orderBookPollInFlight = false
 let syncingLogicalRange = false
 let syncingTimeRange = false
+let logicalSyncRaf = null
+let timeSyncRaf = null
+let pendingLogicalSync = null
+let pendingTimeSync = null
 let reloadQueued = false
 let reloadDebounceTimer = null
 let latestLoadRequestId = 0
@@ -1052,45 +1056,48 @@ function buildTradingDayBoundaryMarkers(candles) {
 
 function toChartData(candles) {
   return candles
-    .map((candle) => {
-      const time = normalizeTimestamp(candle.timestamp)
-      const open = Number(candle.open)
-      const high = Number(candle.high)
-      const low = Number(candle.low)
-      const close = Number(candle.close)
-      if (
-        !Number.isFinite(time) ||
-        time <= 0 ||
-        !Number.isFinite(open) ||
-        !Number.isFinite(high) ||
-        !Number.isFinite(low) ||
-        !Number.isFinite(close)
-      ) {
-        return null
-      }
-      return { time, open, high, low, close }
-    })
+    .map((candle) => toChartPoint(candle))
     .filter(Boolean)
 }
 
 function toVolumeData(candles) {
   return candles
-    .map((candle) => {
-      const time = normalizeTimestamp(candle.timestamp)
-      const open = Number(candle.open)
-      const close = Number(candle.close)
-      const volume = Number(candle.volume)
-      if (!Number.isFinite(time) || time <= 0 || !Number.isFinite(open) || !Number.isFinite(close)) {
-        return null
-      }
-
-      return {
-        time,
-        value: Number.isFinite(volume) ? volume : 0,
-        color: close >= open ? 'rgba(45, 212, 191, 0.68)' : 'rgba(248, 113, 113, 0.68)',
-      }
-    })
+    .map((candle) => toVolumePoint(candle))
     .filter(Boolean)
+}
+
+function toChartPoint(candle) {
+  const time = normalizeTimestamp(candle.timestamp)
+  const open = Number(candle.open)
+  const high = Number(candle.high)
+  const low = Number(candle.low)
+  const close = Number(candle.close)
+  if (
+    !Number.isFinite(time) ||
+    time <= 0 ||
+    !Number.isFinite(open) ||
+    !Number.isFinite(high) ||
+    !Number.isFinite(low) ||
+    !Number.isFinite(close)
+  ) {
+    return null
+  }
+  return { time, open, high, low, close }
+}
+
+function toVolumePoint(candle) {
+  const time = normalizeTimestamp(candle.timestamp)
+  const open = Number(candle.open)
+  const close = Number(candle.close)
+  const volume = Number(candle.volume)
+  if (!Number.isFinite(time) || time <= 0 || !Number.isFinite(open) || !Number.isFinite(close)) {
+    return null
+  }
+  return {
+    time,
+    value: Number.isFinite(volume) ? volume : 0,
+    color: close >= open ? 'rgba(45, 212, 191, 0.68)' : 'rgba(248, 113, 113, 0.68)',
+  }
 }
 
 function mergeCandles(existing, incoming) {
@@ -1099,6 +1106,42 @@ function mergeCandles(existing, incoming) {
     byTimestamp.set(normalizeTimestamp(candle.timestamp), candle)
   }
   return [...byTimestamp.values()].sort((a, b) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp))
+}
+
+function applyRealtimeCandleUpdates(state, incomingCandles) {
+  if (!state?.mainSeries || !state?.volumeSeries) return false
+  if (!Array.isArray(incomingCandles) || incomingCandles.length === 0) return true
+
+  const ordered = [...incomingCandles].sort(
+    (a, b) => normalizeTimestamp(a.timestamp) - normalizeTimestamp(b.timestamp),
+  )
+  let lastTs = state.candles.length
+    ? normalizeTimestamp(state.candles[state.candles.length - 1].timestamp)
+    : null
+
+  for (const candle of ordered) {
+    const ts = normalizeTimestamp(candle.timestamp)
+    if (!ts) continue
+    if (lastTs !== null && ts < lastTs) return false
+
+    if (state.candles.length === 0 || lastTs === null || ts > lastTs) {
+      state.candles.push(candle)
+      const chartPoint = toChartPoint(candle)
+      const volumePoint = toVolumePoint(candle)
+      if (chartPoint) state.mainSeries.update(chartPoint)
+      if (volumePoint) state.volumeSeries.update(volumePoint)
+      lastTs = ts
+      continue
+    }
+
+    state.candles[state.candles.length - 1] = candle
+    const chartPoint = toChartPoint(candle)
+    const volumePoint = toVolumePoint(candle)
+    if (chartPoint) state.mainSeries.update(chartPoint)
+    if (volumePoint) state.volumeSeries.update(volumePoint)
+  }
+
+  return true
 }
 
 async function fetchCandles({ timeframe, start, end, limit }) {
@@ -1586,24 +1629,38 @@ function stopPolling() {
 }
 
 function syncLogicalRangeAcrossCharts(sourceIndex, logicalRange) {
-  if (!logicalRange || syncingLogicalRange) return
-  syncingLogicalRange = true
-  try {
-    chartStates.value.forEach((otherState, otherIndex) => {
-      if (otherIndex === sourceIndex || !otherState.chart) return
-      otherState.chart.timeScale().setVisibleLogicalRange(logicalRange)
-    })
-  } finally {
-    syncingLogicalRange = false
-  }
+  if (!logicalRange) return
+  pendingLogicalSync = { sourceIndex, logicalRange }
+  if (logicalSyncRaf) return
+  logicalSyncRaf = requestAnimationFrame(() => {
+    logicalSyncRaf = null
+    if (!pendingLogicalSync || syncingLogicalRange) return
+    syncingLogicalRange = true
+    try {
+      const { sourceIndex: source, logicalRange: range } = pendingLogicalSync
+      chartStates.value.forEach((otherState, otherIndex) => {
+        if (otherIndex === source || !otherState.chart) return
+        otherState.chart.timeScale().setVisibleLogicalRange(range)
+      })
+    } finally {
+      syncingLogicalRange = false
+      pendingLogicalSync = null
+    }
+  })
 }
 
-function syncTimeRangeAcrossCharts(sourceIndex, timeRange) {
-  if (!timeRange || syncingTimeRange) return
+function areRangesEquivalent(a, b) {
+  if (!a || !b) return false
+  return Math.abs(Number(a.from) - Number(b.from)) < 1 && Math.abs(Number(a.to) - Number(b.to)) < 1
+}
+
+function applyTimeRangeSync(sourceIndex, timeRange) {
   syncingTimeRange = true
   try {
     chartStates.value.forEach((otherState, otherIndex) => {
       if (otherIndex === sourceIndex || !otherState.chart) return
+      const currentRange = otherState.chart.timeScale().getVisibleRange()
+      if (areRangesEquivalent(currentRange, timeRange)) return
       otherState.chart.timeScale().setVisibleRange(timeRange)
       otherState.visibleFrom = timeRange.from
       otherState.visibleTo = timeRange.to
@@ -1611,6 +1668,19 @@ function syncTimeRangeAcrossCharts(sourceIndex, timeRange) {
   } finally {
     syncingTimeRange = false
   }
+}
+
+function syncTimeRangeAcrossCharts(sourceIndex, timeRange) {
+  if (!timeRange || syncingTimeRange) return
+  pendingTimeSync = { sourceIndex, timeRange }
+  if (timeSyncRaf) return
+  timeSyncRaf = requestAnimationFrame(() => {
+    timeSyncRaf = null
+    if (!pendingTimeSync) return
+    const { sourceIndex: source, timeRange: range } = pendingTimeSync
+    pendingTimeSync = null
+    applyTimeRangeSync(source, range)
+  })
 }
 
 function startPolling() {
@@ -1702,8 +1772,8 @@ async function refreshRealtimeCandles() {
   const anchorLatest = await fetchLatestTimestamp(primaryTf)
   if (!anchorLatest) return
 
-  for (const state of chartStates.value) {
-    try {
+  const results = await Promise.allSettled(
+    chartStates.value.map(async (state) => {
       const tfSec = timeframeSeconds[state.timeframe] || 60
       const latestTs = anchorLatest
 
@@ -1712,8 +1782,7 @@ async function refreshRealtimeCandles() {
         : latestTs - tfSec * HISTORY_PAGE_LIMIT
 
       if (latestTs <= lastTs) {
-        hadSuccess = true
-        continue
+        return true
       }
 
       const start = Math.max(lastTs - tfSec, latestTs - tfSec * 1000)
@@ -1732,24 +1801,30 @@ async function refreshRealtimeCandles() {
       })
 
       if (latest.length > 0) {
-        state.candles = mergeCandles(state.candles, latest)
-        state.mainSeries.setData(toChartData(state.candles))
-        state.volumeSeries.setData(toVolumeData(state.candles))
+        const appliedIncrementally = applyRealtimeCandleUpdates(state, latest)
+        if (!appliedIncrementally) {
+          state.candles = mergeCandles(state.candles, latest)
+          state.mainSeries.setData(toChartData(state.candles))
+          state.volumeSeries.setData(toVolumeData(state.candles))
+        }
       }
 
       state.error = ''
-      hadSuccess = true
       lastSyncTs.value = Math.floor(Date.now() / 1000)
-    } catch (error) {
+      return true
+    }).catch((error) => {
       state.error = error.message
-    } finally {
+      return false
+    }).finally(() => {
       state.isLoadingRange = false
       state.loadingReason = null
       state.loadingRangeFrom = null
       state.loadingRangeTo = null
       state.loadingRangeLabel = ''
-    }
-  }
+    }),
+  )
+
+  hadSuccess = results.some((result) => result.status === 'fulfilled' && result.value === true)
 
   if (hadSuccess) {
     connectionState.value = 'online'
@@ -2170,6 +2245,12 @@ onBeforeUnmount(() => {
   stopPolling()
   if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer)
   reloadDebounceTimer = null
+  if (logicalSyncRaf) cancelAnimationFrame(logicalSyncRaf)
+  if (timeSyncRaf) cancelAnimationFrame(timeSyncRaf)
+  logicalSyncRaf = null
+  timeSyncRaf = null
+  pendingLogicalSync = null
+  pendingTimeSync = null
   window.removeEventListener('resize', resizeCharts)
   removeAllCharts()
 })
