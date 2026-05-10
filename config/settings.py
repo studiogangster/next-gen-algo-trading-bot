@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, validator
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 class FeedConfig(BaseModel):
     type: Literal["zerodha_ws", "rest", "kafka"]
@@ -46,6 +46,7 @@ class Settings(BaseModel):
     strategies: List[StrategyConfig]
     dry_run: bool = False
     max_workers: int = 10
+    indicators: List[Dict[str, Any]] = Field(default_factory=list)
 
     @validator("timeframes", pre=True)
     def validate_timeframes(cls, v):

@@ -1,0 +1,14 @@
+typer
+pyyaml
+python-dotenv
+requests
+python-dateutil
+kiteconnect
+ray[default]
+pandas
+pandas-ta-classic
+redis
+pyotp
+pyarrow
+fastapi
+uvicorn

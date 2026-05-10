@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.DS_Store
+node_modules
+tradingview_dashboard/frontend/node_modules
+tradingview_dashboard/frontend/dist
+redis-data
+redis-insight

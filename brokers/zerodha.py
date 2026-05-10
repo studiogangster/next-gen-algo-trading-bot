@@ -1,12 +1,23 @@
 
 import pandas as pd
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import ray
 
 from brokers.kite_trade import ZerodhaBroker
 from storage.redis_client import get_redis_client
 import time
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _to_ist_datetime(value):
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=IST)
+        return value.astimezone(IST)
+    return datetime.fromtimestamp(float(value), IST)
 
 def sync_zerodha_historical_realtime(enctoken, symbol, timeframe, sync_interval=60, interval_days=60, partition_timestamp=None):
     """
@@ -19,6 +30,21 @@ def sync_zerodha_historical_realtime(enctoken, symbol, timeframe, sync_interval=
     instrument_token = int(symbol)
     ts_field_key = f"ts:candle:{instrument_token}:{timeframe}:open"
 
+    def get_timeframe_delta(tf):
+        if tf == "1m":
+            return timedelta(minutes=1)
+        if tf == "5m":
+            return timedelta(minutes=5)
+        if tf == "30m":
+            return timedelta(minutes=30)
+        if tf == "1h":
+            return timedelta(hours=1)
+        if tf == "day":
+            return timedelta(days=1)
+        return timedelta(minutes=1)
+
+    tf_delta = get_timeframe_delta(timeframe)
+
     while True:
         # Get the latest timestamp in Redis
         try:
@@ -29,24 +55,37 @@ def sync_zerodha_historical_realtime(enctoken, symbol, timeframe, sync_interval=
             else:
                 raise
             
-        
-        from datetime import time as _time
-        today_midnight = datetime.combine(datetime.today(),  _time.min)
-        
         if partition_timestamp is not None:
-            from_date = partition_timestamp if isinstance(partition_timestamp, datetime) else datetime.fromtimestamp(partition_timestamp)
+            from_date = _to_ist_datetime(partition_timestamp)
         elif ts_data:
             redis_max = int(ts_data[-1][0])
-            from_date = datetime.fromtimestamp(redis_max)
+            # Start from latest known candle for realtime-style incremental sync.
+            from_date = datetime.fromtimestamp(redis_max, IST)
         else:
-            from_date = today_midnight  # Will default to previous_days in fetch_zerodha_historical
-            
-        
-        # Today's 00:00 timestamp
-        
-        print("debug", from_date, today_midnight)
-        from_date = min(from_date, today_midnight)
-        to_date = datetime.now()
+            to_date = datetime.now(IST)
+            # Cold start fallback: keep a bounded initial window instead of day-boundary clamp.
+            from_date = to_date - timedelta(days=1)
+
+        # Realtime sync should always progress to "now" without market-close/day caps.
+        to_date = datetime.now(IST)
+
+        # No forward window left to sync.
+        if from_date >= to_date:
+            print(f"[sync_zerodha_historical_realtime] No new window ({from_date} >= {to_date}); sleeping.")
+            time.sleep(sync_interval)
+            continue
+
+        # If latest Redis candle already covers the current realtime boundary,
+        # skip this cycle to avoid repeatedly upserting the same bars.
+        if ts_data:
+            redis_max_dt = datetime.fromtimestamp(int(ts_data[-1][0]), IST)
+            if redis_max_dt >= (to_date - tf_delta):
+                print(
+                    "[sync_zerodha_historical_realtime] Up-to-date "
+                    f"(redis_max={redis_max_dt}, to_date={to_date}); sleeping."
+                )
+                time.sleep(sync_interval)
+                continue
         print(f"[sync_zerodha_historical_realtime] Syncing from {from_date} to {to_date}")
 
         # Fetch and ingest new data
@@ -81,9 +120,13 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
 
     # Default to last 5 days if not provided
     if to_date is None:
-        to_date = datetime.now()
+        to_date = datetime.now(IST)
+    else:
+        to_date = _to_ist_datetime(to_date)
     if from_date is None:
         from_date = to_date - timedelta(days=previous_days)
+    else:
+        from_date = _to_ist_datetime(from_date)
 
     instrument_token = int(symbol)
 
@@ -108,18 +151,17 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
         redis_max = None
         
         
-    if upsert:
-        redis_min = None
-        redis_max = None
-        
-
     # Convert from_date and to_date to epoch
     req_min = int(from_date.timestamp())
     req_max = int(to_date.timestamp())
 
 
     if redis_min is not None and redis_max is not None:
-        print(f"[fetch_zerodha_historical] Redis covers: {datetime.fromtimestamp(redis_min)} ({redis_min}) to {datetime.fromtimestamp(redis_max)} ({redis_max})")
+        print(
+            "[fetch_zerodha_historical] Redis covers: "
+            f"{datetime.fromtimestamp(redis_min, IST)} ({redis_min}) "
+            f"to {datetime.fromtimestamp(redis_max, IST)} ({redis_max})"
+        )
     else:
         print("[fetch_zerodha_historical] Redis has no data for this key.")
 
@@ -142,18 +184,34 @@ def fetch_zerodha_historical(enctoken, symbol, timeframe, from_date=None, to_dat
 
     # Determine which ranges to fetch from Zerodha
     fetch_ranges = []
-    if redis_min is None or req_min < redis_min:
-        # Need to fetch from req_min up to (but not including) redis_min
-        fetch_start = from_date
-        fetch_end = datetime.fromtimestamp(redis_min) - tf_delta if redis_min else to_date
-        if fetch_start <= fetch_end:
-            fetch_ranges.append((fetch_start, fetch_end))
-    if redis_max is None or req_max > redis_max:
-        # Need to fetch from (redis_max + 1 interval) up to req_max
-        fetch_start = datetime.fromtimestamp(redis_max) + tf_delta if redis_max else from_date
-        fetch_end = to_date
-        if fetch_start <= fetch_end:
-            fetch_ranges.append((fetch_start, fetch_end))
+    if upsert:
+        # Upsert mode is intended for realtime correction windows; fetch exactly requested range once.
+        fetch_ranges.append((from_date, to_date))
+    elif redis_min is None and redis_max is None:
+        # Cold start: fetch only requested range once (avoid duplicate range generation).
+        fetch_ranges.append((from_date, to_date))
+    else:
+        if req_min < redis_min:
+            # For intraday timeframes, older broker history is often unavailable.
+            # When Redis already has a lower bound, avoid re-probing ancient gaps.
+            if timeframe in {"1m", "5m", "30m", "1h"}:
+                print(
+                    "[fetch_zerodha_historical] Skipping older-than-Redis backfill "
+                    f"for intraday timeframe {timeframe}. "
+                    f"Requested min={from_date}, redis_min={datetime.fromtimestamp(redis_min, IST)}"
+                )
+            else:
+                # Need to fetch from req_min up to (but not including) redis_min
+                fetch_start = from_date
+                fetch_end = datetime.fromtimestamp(redis_min, IST) - tf_delta
+                if fetch_start <= fetch_end:
+                    fetch_ranges.append((fetch_start, fetch_end))
+        if req_max > redis_max:
+            # Need to fetch from (redis_max + 1 interval) up to req_max
+            fetch_start = datetime.fromtimestamp(redis_max, IST) + tf_delta
+            fetch_end = to_date
+            if fetch_start <= fetch_end:
+                fetch_ranges.append((fetch_start, fetch_end))
 
     print(f"[fetch_zerodha_historical] Will fetch {len(fetch_ranges)} missing range(s):")
     for i, (start, end) in enumerate(fetch_ranges):

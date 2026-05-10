@@ -29,6 +29,29 @@ strategies:
       rsi_length: 14
       supertrend_length: 10
       supertrend_multiplier: 3.0
+  - type: "yaml_rule"
+    params:
+      name: "standard_signal_generator"
+      quantity: 1
+      dedupe_consecutive: true
+      cooldown_bars: 2
+      indicators:
+        - id: "rsi"
+          type: "rsi"
+          params:
+            length: 14
+        - id: "sma_fast"
+          type: "sma"
+          params:
+            length: 20
+      buy:
+        all:
+          - gt: ["rsi.value", 30]
+          - gt: ["close", "sma_fast.value"]
+      sell:
+        any:
+          - lt: ["rsi.value", 70]
+          - lt: ["close", "sma_fast.value"]
 
 dry_run: true
 max_workers: 4

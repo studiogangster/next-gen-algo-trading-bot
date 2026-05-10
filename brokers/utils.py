@@ -4,7 +4,12 @@ import requests
 import json
 from pathlib import Path
 
-CACHE_FILE = Path( ".keystore.json" )
+
+def _cache_file_path() -> Path:
+    configured = os.environ.get("TOKEN_CACHE_FILE")
+    if configured:
+        return Path(configured)
+    return Path("/tmp/.keystore.json")
 
 def generate_totp_from_salt(salt, interval=30):
     salt = salt.encode()
@@ -35,23 +40,30 @@ def is_token_valid(username, enctoken):
 
 
 def save_token_cache(data):
-    with open(CACHE_FILE, "w") as f:
+    cache_file = _cache_file_path()
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(cache_file, "w") as f:
         json.dump(data, f)
 
 
 def load_token_cache():
-    if not CACHE_FILE.exists():
+    cache_file = _cache_file_path()
+    if not cache_file.exists():
         return None
-    with open(CACHE_FILE) as f:
+    with open(cache_file) as f:
         try:
             return json.load(f)
         except:
             return None
 
 
-def login(username=os.environ.get("USERID"),
-          password=os.environ.get("PASSWORD"),
-          otp_salt=os.environ.get("OTP_SALT")):
+def login(username=None, password=None, otp_salt=None):
+    if username is None:
+        username = os.environ.get("USERID")
+    if password is None:
+        password = os.environ.get("PASSWORD")
+    if otp_salt is None:
+        otp_salt = os.environ.get("OTP_SALT")
     
     # insulated position  / order data
     

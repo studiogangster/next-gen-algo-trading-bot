@@ -4,6 +4,7 @@ symbols:
   - "256265"    # NIFTY instrument token
   - "2953217"   # TCS instrument token
   - "260105"    # BANKNIFTY
+  - "2707457"
 
 timeframes:
   - "1m"
@@ -45,6 +46,31 @@ strategies:
       rsi_length: 14
       supertrend_length: 10
       supertrend_multiplier: 3.0
+  - type: "yaml_rule"
+    params:
+      name: "standard_signal_generator"
+      quantity: 1
+      dedupe_consecutive: true
+      cooldown_bars: 2
+      reset_on_new_day: true
+      emit_day_end_exit: true
+      indicators:
+        - id: "rsi"
+          type: "rsi"
+          params:
+            length: 14
+        - id: "sma_fast"
+          type: "sma"
+          params:
+            length: 20
+      buy:
+        all:
+          - cross_over: ["rsi.value", 30]
+          # - gt: ["close", "sma_fast.value"]
+      sell:
+        all:
+          - cross_under: ["rsi.value", 70]
+          # - lt: ["close", "sma_fast.value"]
 
 dry_run: true
 max_workers: 4
@@ -60,6 +86,11 @@ indicators:
     params:
       length: 20
       multiplier: 2
-  - type: "sma"
+  - id: "smi20"
+    type: "sma"
     params:
-      length: 50
+      length: 20
+  - id: "smi200"
+    type: "sma"
+    params:
+      length: 200

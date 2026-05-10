@@ -4,7 +4,10 @@ import traceback
 import yaml
 import pandas as pd
 import ray
-import pandas_ta as ta
+try:
+    import pandas_ta as ta
+except ImportError:
+    import pandas_ta_classic as ta
 from storage.redis_client import get_redis_client, ts_add
 from datetime import datetime, timedelta
 import pytz

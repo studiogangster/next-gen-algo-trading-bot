@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime
 
 from dotenv import load_dotenv
 from urllib3 import Retry
@@ -113,11 +114,19 @@ class ZerodhaBroker:
         return Exchange
 
     def historical_data(self, instrument_token, from_date, to_date, interval, continuous=False, oi=False):
+        def _fmt_dt(value):
+            if isinstance(value, datetime):
+                # Historical API expects plain datetime text without timezone suffix.
+                return value.strftime("%Y-%m-%d %H:%M:%S")
+            return value
+
         params = {"from": from_date,
                   "to": to_date,
                   "interval": interval,
                   "continuous": 1 if continuous else 0,
                   "oi": 1 if oi else 0}
+        params["from"] = _fmt_dt(params["from"])
+        params["to"] = _fmt_dt(params["to"])
         
 
         lst = self.session.get(
@@ -125,11 +134,25 @@ class ZerodhaBroker:
             headers=self.headers)
         
 
-        print( "status_code",  lst.status_code)
+        print("status_code", lst.status_code)
 
-        lst = lst.json()["data"]["candles"]
+        payload = lst.json()
+        if lst.status_code != 200:
+            print(
+                "[historical_data] non-200 response",
+                {
+                    "instrument_token": instrument_token,
+                    "interval": interval,
+                    "from": params["from"],
+                    "to": params["to"],
+                    "payload": payload,
+                },
+            )
+            return []
+
+        candles = ((payload or {}).get("data") or {}).get("candles") or []
         records = []
-        for i in lst:
+        for i in candles:
             record = {"date": dateutil.parser.parse(i[0]), "open": i[1], "high": i[2], "low": i[3],
                       "close": i[4], "volume": i[5],}
 
