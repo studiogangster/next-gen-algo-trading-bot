@@ -1051,26 +1051,46 @@ function buildTradingDayBoundaryMarkers(candles) {
 }
 
 function toChartData(candles) {
-  return candles.map((candle) => ({
-    time: normalizeTimestamp(candle.timestamp),
-    open: candle.open,
-    high: candle.high,
-    low: candle.low,
-    close: candle.close,
-  }))
+  return candles
+    .map((candle) => {
+      const time = normalizeTimestamp(candle.timestamp)
+      const open = Number(candle.open)
+      const high = Number(candle.high)
+      const low = Number(candle.low)
+      const close = Number(candle.close)
+      if (
+        !Number.isFinite(time) ||
+        time <= 0 ||
+        !Number.isFinite(open) ||
+        !Number.isFinite(high) ||
+        !Number.isFinite(low) ||
+        !Number.isFinite(close)
+      ) {
+        return null
+      }
+      return { time, open, high, low, close }
+    })
+    .filter(Boolean)
 }
 
 function toVolumeData(candles) {
-  return candles.map((candle) => {
-    const open = Number(candle.open)
-    const close = Number(candle.close)
+  return candles
+    .map((candle) => {
+      const time = normalizeTimestamp(candle.timestamp)
+      const open = Number(candle.open)
+      const close = Number(candle.close)
+      const volume = Number(candle.volume)
+      if (!Number.isFinite(time) || time <= 0 || !Number.isFinite(open) || !Number.isFinite(close)) {
+        return null
+      }
 
-    return {
-      time: normalizeTimestamp(candle.timestamp),
-      value: Number(candle.volume) || 0,
-      color: close >= open ? 'rgba(45, 212, 191, 0.68)' : 'rgba(248, 113, 113, 0.68)',
-    }
-  })
+      return {
+        time,
+        value: Number.isFinite(volume) ? volume : 0,
+        color: close >= open ? 'rgba(45, 212, 191, 0.68)' : 'rgba(248, 113, 113, 0.68)',
+      }
+    })
+    .filter(Boolean)
 }
 
 function mergeCandles(existing, incoming) {
@@ -1319,10 +1339,10 @@ function addIndicatorToChart(state, indicator, paneIndex = 2) {
       .filter((value) => value[column] !== null && value[column] !== undefined)
       .map((value) => ({
         time: normalizeTimestamp(value.timestamp),
-        value: value[column],
+        value: Number(value[column]),
         source: value._source || indicator.source || 'computed',
       }))
-      .filter((point) => Number.isFinite(point.time) && point.time > 0)
+      .filter((point) => Number.isFinite(point.time) && point.time > 0 && Number.isFinite(point.value))
 
     if (lineData.length > 0) {
       const firstTime = lineData[0].time
@@ -1404,6 +1424,29 @@ function addIndicatorToChart(state, indicator, paneIndex = 2) {
   return created
 }
 
+function computeIndicatorSignature(indicators, signals) {
+  const indicatorParts = Array.isArray(indicators)
+    ? indicators.map((indicator) => {
+        const name = normalizeIndicatorName(indicator?.name)
+        const columns = Array.isArray(indicator?.columns) ? indicator.columns.join(',') : ''
+        const values = Array.isArray(indicator?.values) ? indicator.values : []
+        const lastTs = values.length
+          ? normalizeTimestamp(values[values.length - 1]?.timestamp ?? values[values.length - 1]?.time)
+          : 0
+        return `${name}|${columns}|${values.length}|${lastTs}`
+      })
+    : []
+
+  const signalParts = Array.isArray(signals)
+    ? signals.map((signal) => {
+        const ts = normalizeTimestamp(signal?.timestamp ?? signal?.epoch)
+        return `${normalizeSignalAction(signal?.action)}|${ts}|${signal?.strategy || ''}`
+      })
+    : []
+
+  return `${indicatorParts.join('||')}##${signalParts.join('||')}`
+}
+
 function ensureIndicatorPane(state) {
   if (!state.chart || state.indicatorSeries.length > 0 || state.candles.length === 0) return
 
@@ -1482,11 +1525,17 @@ async function refreshIndicatorsForState(state) {
       end: range.end,
       limit: indicatorLimit,
     })
-    state.indicators = bundle.indicators || []
-    ensureIndicatorVisibilityDefaults(state.indicators)
-    state.signals = bundle.signals || state.signals || []
-    renderIndicatorsForState(state)
-    applySignalMarkers(state)
+    const nextIndicators = bundle.indicators || []
+    const nextSignals = bundle.signals || state.signals || []
+    const nextSig = computeIndicatorSignature(nextIndicators, nextSignals)
+    if (nextSig !== state.indicatorSignature) {
+      state.indicators = nextIndicators
+      ensureIndicatorVisibilityDefaults(state.indicators)
+      state.signals = nextSignals
+      renderIndicatorsForState(state)
+      applySignalMarkers(state)
+      state.indicatorSignature = nextSig
+    }
     state.error = ''
   } catch (error) {
     state.error = error.message
@@ -1612,11 +1661,17 @@ async function fetchOlderCandles(state) {
           end: range.end,
           limit: Math.min(Math.max(state.candles.length + 200, 500), 20000),
         })
-        state.indicators = bundle.indicators || []
-        ensureIndicatorVisibilityDefaults(state.indicators)
-        state.signals = bundle.signals || state.signals || []
-        renderIndicatorsForState(state)
-        applySignalMarkers(state)
+        const nextIndicators = bundle.indicators || []
+        const nextSignals = bundle.signals || state.signals || []
+        const nextSig = computeIndicatorSignature(nextIndicators, nextSignals)
+        if (nextSig !== state.indicatorSignature) {
+          state.indicators = nextIndicators
+          ensureIndicatorVisibilityDefaults(state.indicators)
+          state.signals = nextSignals
+          renderIndicatorsForState(state)
+          applySignalMarkers(state)
+          state.indicatorSignature = nextSig
+        }
       }
     } else {
       state.noMoreHistory = true
@@ -1635,6 +1690,7 @@ async function fetchOlderCandles(state) {
 }
 
 async function refreshRealtimeCandles() {
+  if (isReloading.value) return
   if (!useFullRange.value) {
     const toEpoch = parseLocalDateTimeInput(rangeToInput.value)
     if (toEpoch !== null && toEpoch < Math.floor(Date.now() / 1000) - 120) return
@@ -1679,7 +1735,6 @@ async function refreshRealtimeCandles() {
         state.candles = mergeCandles(state.candles, latest)
         state.mainSeries.setData(toChartData(state.candles))
         state.volumeSeries.setData(toVolumeData(state.candles))
-        await refreshIndicatorsForState(state)
       }
 
       state.error = ''
@@ -1704,9 +1759,8 @@ async function refreshRealtimeCandles() {
 }
 
 async function refreshIndicators() {
-  for (const state of chartStates.value) {
-    await refreshIndicatorsForState(state)
-  }
+  if (isReloading.value) return
+  await Promise.allSettled(chartStates.value.map((state) => refreshIndicatorsForState(state)))
 }
 
 async function loadDataAndRenderMulti() {
@@ -1764,12 +1818,14 @@ async function loadDataAndRenderMulti() {
       const candles = bundle.candles || []
       const indicators = bundle.indicators || []
       const signals = bundle.signals || []
+      const indicatorSignature = computeIndicatorSignature(indicators, signals)
 
       nextStates.push({
         timeframe,
         candles,
         indicators,
         signals,
+        indicatorSignature,
         chart: null,
         mainSeries: null,
         signalMarkers: null,

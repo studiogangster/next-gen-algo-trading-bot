@@ -94,6 +94,35 @@ services:
       - REDIS_URL=redis://redis:6379
       - TOKEN_CACHE_FILE=/cache/keystore.json
 
+  auto-execution:
+    image: ngat-runtime:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.runtime
+    container_name: auto-execution
+    working_dir: /app
+    volumes:
+      - token-cache:/cache
+    command: >-
+      python -m cli.main start-auto-execution
+      --config-path config/config.yaml
+      --signal-queue-key signals:approved:queue
+      --poll-timeout-sec 1
+      --lock-ttl-sec 600
+      --idempotency-ttl-sec 86400
+      --transaction-timeout-sec 8
+      --cancel-timeout-sec 8
+      --retry-enqueue-delay-sec 0.25
+      --lock-hold-ttl-on-manual-review-sec 86400
+      --deadletter-key signals:approved:deadletter
+    depends_on:
+      - redis
+      - order-sync
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379
+      - TOKEN_CACHE_FILE=/cache/keystore.json
+
   backend:
     image: ngat-runtime:latest
     build:

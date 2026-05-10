@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import time
 from core.order_sync_service import run_order_sync_loop
 from core.eod_squareoff_service import run_eod_squareoff_loop
+from core.auto_execution_service import run_auto_execution_loop
 
 app = typer.Typer()
 
@@ -252,6 +253,49 @@ def start_eod_squareoff(
         dry_run=dry_run,
         cancel_pending_orders=cancel_pending_orders,
         weekdays_only=weekdays_only,
+    )
+
+
+@app.command("start-auto-execution")
+def start_auto_execution(
+    config_path: str = typer.Option("config/config.yaml", help="Path to config YAML file"),
+    signal_queue_key: str = typer.Option(
+        "signals:approved:queue",
+        help="Redis list key containing approved signal JSON payloads.",
+    ),
+    poll_timeout_sec: int = typer.Option(1, help="Queue blocking pop timeout in seconds."),
+    lock_ttl_sec: int = typer.Option(600, help="User-account transaction lock TTL in seconds."),
+    idempotency_ttl_sec: int = typer.Option(86400, help="Idempotency key retention TTL in seconds."),
+    transaction_timeout_sec: float = typer.Option(8.0, help="Max seconds to wait for transaction execution."),
+    cancel_timeout_sec: float = typer.Option(8.0, help="Max seconds to wait for cancel confirmation."),
+    retry_enqueue_delay_sec: float = typer.Option(0.25, help="Delay before re-enqueue when account is locked."),
+    lock_hold_ttl_on_manual_review_sec: int = typer.Option(
+        86400,
+        help="Lock TTL when transaction enters manual review.",
+    ),
+    deadletter_key: str = typer.Option(
+        "signals:approved:deadletter",
+        help="Redis list key where invalid payloads are pushed.",
+    ),
+):
+    """
+    Start dedicated auto-execution mediator service (broker write-only, cache read-only).
+    """
+    apply_broker_env_from_config(config_path)
+    typer.echo(
+        "Starting auto execution service "
+        f"(queue={signal_queue_key}, tx_timeout={transaction_timeout_sec}s, cancel_timeout={cancel_timeout_sec}s)..."
+    )
+    run_auto_execution_loop(
+        signal_queue_key=signal_queue_key,
+        poll_timeout_sec=poll_timeout_sec,
+        lock_ttl_sec=lock_ttl_sec,
+        idempotency_ttl_sec=idempotency_ttl_sec,
+        transaction_timeout_sec=transaction_timeout_sec,
+        cancel_timeout_sec=cancel_timeout_sec,
+        retry_enqueue_delay_sec=retry_enqueue_delay_sec,
+        lock_hold_ttl_on_manual_review_sec=lock_hold_ttl_on_manual_review_sec,
+        deadletter_key=deadletter_key,
     )
 
 @app.command('generate-timeframe')
