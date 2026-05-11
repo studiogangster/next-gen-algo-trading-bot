@@ -64,6 +64,15 @@ class IndicatorSyncWorker:
         self.last_synced_ts: Dict[Tuple[str, str], int] = {}
         self.verbose = str(os.getenv("INDICATOR_SYNC_VERBOSE", "0")).strip().lower() in {"1", "true", "yes", "on"}
         self.skip_historical_if_present = str(os.getenv("INDICATOR_SKIP_HISTORICAL_IF_PRESENT", "1")).strip().lower() in {"1", "true", "yes", "on"}
+        lookback_bars_raw = os.getenv("INDICATOR_HISTORICAL_LOOKBACK_BARS", "").strip()
+        self.historical_lookback_bars: Optional[int] = None
+        if lookback_bars_raw:
+            try:
+                parsed = int(lookback_bars_raw)
+                if parsed > 0:
+                    self.historical_lookback_bars = parsed
+            except Exception:
+                self.historical_lookback_bars = None
 
     def _configured_indicator_defs(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
@@ -289,6 +298,14 @@ class IndicatorSyncWorker:
                 return
 
             sec = timeframe_seconds(timeframe)
+            if self.historical_lookback_bars is not None:
+                bounded_first = max(first, latest - (self.historical_lookback_bars * sec))
+                if bounded_first > first and self.verbose:
+                    print(
+                        f"[IndicatorSync] {symbol} {timeframe}: limiting historical backfill "
+                        f"to last {self.historical_lookback_bars} bars."
+                    )
+                first = bounded_first
             chunk_step = max(self.historical_chunk_points * sec, sec)
             overlap = self.warmup_bars * sec
 

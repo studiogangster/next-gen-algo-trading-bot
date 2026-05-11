@@ -35,6 +35,10 @@ strategies:
       quantity: 1
       dedupe_consecutive: true
       cooldown_bars: 2
+      trade_target:
+        instrument: "FUT"
+        future_preference: "next"
+        exchange: "NFO"
       indicators:
         - id: "rsi"
           type: "rsi"

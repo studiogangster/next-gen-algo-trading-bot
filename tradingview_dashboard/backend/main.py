@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, date
 import json
 import math
 import numbers
@@ -621,6 +621,7 @@ def get_chart_data(
         else:
             raise
 
+    trade_contract = None
     try:
         signals_payload = get_signals(
             instrument_token=instrument_token,
@@ -632,9 +633,11 @@ def get_chart_data(
             strategy_name=strategy_name,
         )
         signals = signals_payload.get("signals", [])
+        trade_contract = signals_payload.get("trade_contract")
     except HTTPException as exc:
         if exc.status_code in {404, 422}:
             signals = []
+            trade_contract = None
         else:
             raise
 
@@ -647,6 +650,7 @@ def get_chart_data(
         "candles": candles_payload.get("candles", []),
         "indicators": indicators,
         "signals": signals,
+        "trade_contract": trade_contract,
     }
 
 
@@ -660,6 +664,7 @@ def get_signals(
     signal_limit: int = Query(200, description="Max number of generated signal events to return"),
     strategy_name: Optional[str] = Query(None, description="Optional strategy name filter"),
 ):
+    client: Redis = get_redis_client()
     candles_payload = get_candles(
         instrument_token=instrument_token,
         timeframe=timeframe,
@@ -669,11 +674,11 @@ def get_signals(
     )
     candles = candles_payload.get("candles", [])
     if not candles:
-        return {"signals": [], "count": 0, "strategies": []}
+        return {"signals": [], "count": 0, "strategies": [], "trade_contract": None}
 
     df = pd.DataFrame(candles).set_index("timestamp")
     if df.empty:
-        return {"signals": [], "count": 0, "strategies": []}
+        return {"signals": [], "count": 0, "strategies": [], "trade_contract": None}
 
     strategy_params_list = load_rule_strategies_from_config(_root_config_path())
     if strategy_name:
@@ -683,8 +688,16 @@ def get_signals(
 
     out: List[Dict[str, Any]] = []
     strategy_names: List[str] = []
+    strategy_trade_contracts: List[Dict[str, Any]] = []
     for strategy_params in strategy_params_list:
-        strategy_names.append(str(strategy_params.get("name") or "yaml_rule"))
+        strategy_label = str(strategy_params.get("name") or "yaml_rule")
+        strategy_names.append(strategy_label)
+        trade_contract = _resolve_trade_contract_for_strategy(
+            client=client,
+            monitored_instrument_token=instrument_token,
+            strategy_params=strategy_params,
+        )
+        strategy_trade_contracts.append({"strategy": strategy_label, "trade_contract": trade_contract})
         try:
             generated = generate_rule_signals(
                 candles=df,
@@ -692,6 +705,8 @@ def get_signals(
                 symbol=str(instrument_token),
                 timeframe=timeframe,
             )
+            for event in generated:
+                event["trade_contract"] = trade_contract
             out.extend(generated)
         except Exception as exc:
             out.append(
@@ -702,6 +717,7 @@ def get_signals(
                     "action": "ERROR",
                     "timestamp": None,
                     "reason": str(exc),
+                    "trade_contract": trade_contract,
                 }
             )
 
@@ -714,6 +730,8 @@ def get_signals(
         "signals": _json_safe(out),
         "count": len(out),
         "strategies": strategy_names,
+        "trade_contract": _json_safe(strategy_trade_contracts[0]["trade_contract"]) if strategy_trade_contracts else None,
+        "strategy_trade_contracts": _json_safe(strategy_trade_contracts),
     }
 
 
@@ -754,6 +772,7 @@ def signals_catalog():
                 "name": name,
                 "valid": len(errors) == 0,
                 "errors": errors,
+                "trade_target": _strategy_trade_target(params),
             }
         )
     return {
@@ -790,6 +809,181 @@ def _instrument_record(client: Redis, token: str) -> Dict[str, str]:
     if not rec:
         return {}
     return rec
+
+
+def _sanitize_symbol_key(raw: str) -> str:
+    return "".join(ch for ch in str(raw or "").upper() if ch.isalnum())
+
+
+def _parse_iso_date(raw: Any) -> Optional[date]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except Exception:
+            pass
+    return None
+
+
+def _strategy_trade_target(strategy_params: Dict[str, Any]) -> Dict[str, Any]:
+    # Backward/forward compatible strategy-level execution target.
+    # Defaults keep existing behavior (trade the monitored/spot instrument).
+    trade_target = strategy_params.get("trade_target")
+    if not isinstance(trade_target, dict):
+        trade_target = {}
+    instrument = str(trade_target.get("instrument") or "SPOT").strip().upper()
+    if instrument in {"FUTURE", "FUTURES"}:
+        instrument = "FUT"
+    if instrument not in {"SPOT", "FUT"}:
+        instrument = "SPOT"
+
+    preference = str(trade_target.get("future_preference") or trade_target.get("fut_preference") or "next").strip().lower()
+    if preference not in {"next", "nearest"}:
+        preference = "next"
+
+    exchange = str(trade_target.get("exchange") or "NFO").strip().upper()
+    if not exchange:
+        exchange = "NFO"
+
+    return {
+        "instrument": instrument,
+        "future_preference": preference,
+        "exchange": exchange,
+    }
+
+
+def _pick_future_for_underlying(
+    client: Redis,
+    monitored_instrument_token: int,
+    preferred_exchange: str = "NFO",
+    future_preference: str = "next",
+) -> Optional[Dict[str, Any]]:
+    monitored = _instrument_record(client, str(monitored_instrument_token))
+    if not monitored:
+        return None
+
+    underlying_symbol = str(monitored.get("tradingsymbol") or "").strip()
+    underlying_name = str(monitored.get("name") or "").strip()
+    symbol_key = _sanitize_symbol_key(underlying_symbol)
+    name_key = _sanitize_symbol_key(underlying_name)
+    candidate_prefixes = {k for k in {symbol_key, name_key, symbol_key.split("50")[0]} if k}
+    if not candidate_prefixes:
+        return None
+
+    future_tokens: List[str] = []
+    candidate_set_groups = [
+        [f"{UNIVERSE_NS}:instruments:segment:{preferred_exchange}-FUT"],
+        [f"{UNIVERSE_NS}:instruments:exchange:{preferred_exchange}", f"{UNIVERSE_NS}:instruments:type:FUT"],
+        [f"{UNIVERSE_NS}:instruments:type:FUT"],
+    ]
+    for set_keys in candidate_set_groups:
+        try:
+            if len(set_keys) == 1:
+                tokens = list(client.smembers(set_keys[0]))
+            else:
+                tokens = list(client.execute_command("SINTER", *set_keys))
+        except Exception:
+            tokens = []
+        if tokens:
+            future_tokens = tokens
+            break
+    if not future_tokens:
+        return None
+
+    pipe = client.pipeline(transaction=False)
+    for tok in future_tokens:
+        pipe.hgetall(f"{UNIVERSE_NS}:instrument:{tok}")
+    all_futures = [rec for rec in pipe.execute() if rec]
+
+    today = date.today()
+    matches: List[Dict[str, Any]] = []
+    for rec in all_futures:
+        tradingsymbol = str(rec.get("tradingsymbol") or "")
+        fut_key = _sanitize_symbol_key(tradingsymbol)
+        if not fut_key:
+            continue
+        if not any(fut_key.startswith(prefix) for prefix in candidate_prefixes):
+            continue
+
+        expiry = _parse_iso_date(rec.get("expiry"))
+        if expiry is None:
+            continue
+        if expiry < today:
+            continue
+        rec_copy = dict(rec)
+        rec_copy["_expiry_date"] = expiry
+        matches.append(rec_copy)
+
+    if not matches:
+        return None
+
+    matches.sort(key=lambda row: (row["_expiry_date"], int(float(row.get("instrument_token", "0") or 0))))
+    if future_preference == "next" and len(matches) > 1:
+        chosen = matches[1]
+    else:
+        chosen = matches[0]
+
+    return {
+        "instrument_token": chosen.get("instrument_token"),
+        "tradingsymbol": chosen.get("tradingsymbol"),
+        "exchange": chosen.get("exchange"),
+        "segment": chosen.get("segment"),
+        "instrument_type": chosen.get("instrument_type"),
+        "expiry": chosen.get("expiry"),
+        "lot_size": chosen.get("lot_size"),
+    }
+
+
+def _resolve_trade_contract_for_strategy(
+    client: Redis,
+    monitored_instrument_token: int,
+    strategy_params: Dict[str, Any],
+) -> Dict[str, Any]:
+    trade_target = _strategy_trade_target(strategy_params)
+    if trade_target["instrument"] != "FUT":
+        monitored = _instrument_record(client, str(monitored_instrument_token))
+        return {
+            "mode": "SPOT",
+            "instrument_token": str(monitored_instrument_token),
+            "tradingsymbol": monitored.get("tradingsymbol") if monitored else None,
+            "exchange": monitored.get("exchange") if monitored else None,
+            "source": "monitored_instrument",
+        }
+
+    fut = _pick_future_for_underlying(
+        client=client,
+        monitored_instrument_token=monitored_instrument_token,
+        preferred_exchange=trade_target["exchange"],
+        future_preference=trade_target["future_preference"],
+    )
+    if fut:
+        return {
+            "mode": "FUT",
+            "future_preference": trade_target["future_preference"],
+            "instrument_token": fut.get("instrument_token"),
+            "tradingsymbol": fut.get("tradingsymbol"),
+            "exchange": fut.get("exchange"),
+            "segment": fut.get("segment"),
+            "instrument_type": fut.get("instrument_type"),
+            "expiry": fut.get("expiry"),
+            "lot_size": fut.get("lot_size"),
+            "source": "resolved_from_universe",
+        }
+
+    monitored = _instrument_record(client, str(monitored_instrument_token))
+    return {
+        "mode": "FUT",
+        "future_preference": trade_target["future_preference"],
+        "instrument_token": None,
+        "tradingsymbol": None,
+        "exchange": trade_target["exchange"],
+        "source": "unresolved",
+        "fallback_mode": "SPOT",
+        "fallback_instrument_token": str(monitored_instrument_token),
+        "fallback_tradingsymbol": monitored.get("tradingsymbol") if monitored else None,
+    }
 
 
 @app.get("/universe/meta")

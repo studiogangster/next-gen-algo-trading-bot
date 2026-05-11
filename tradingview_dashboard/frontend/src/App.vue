@@ -37,6 +37,7 @@ const REALTIME_POLL_MS = 2000
 const INDICATOR_POLL_MS = 5000
 const ORDER_BOOK_POLL_MS = 2000
 const HISTORY_PAGE_LIMIT = 2000
+const INDICATOR_STALE_REFRESH_MS = 60000
 
 const instrumentToken = ref(256265)
 const selectedTimeframes = ref(['1m'])
@@ -102,6 +103,9 @@ const localTradeEvents = ref([])
 const selectedOrderBookUsers = ref([])
 const orderBookUserSubTabs = ref({})
 const showOrderBookStats = ref(false)
+const showInsightSnapshot = ref(false)
+const showInsightSignals = ref(false)
+const activeTradeContract = ref(null)
 
 let realtimeTimer = null
 let indicatorTimer = null
@@ -210,6 +214,23 @@ const signalTimeline = computed(() => {
 })
 
 const validSignalStrategies = computed(() => signalStrategies.value.filter((item) => item.valid))
+const tradeContractLabel = computed(() => {
+  const tc = activeTradeContract.value
+  if (!tc || typeof tc !== 'object') return 'SPOT (default)'
+  if (tc.mode === 'FUT' && tc.tradingsymbol) {
+    const pref = tc.future_preference ? ` ${String(tc.future_preference).toUpperCase()}` : ''
+    return `${tc.tradingsymbol}${pref}`
+  }
+  if (tc.mode === 'SPOT') {
+    return tc.tradingsymbol ? `${tc.tradingsymbol} (SPOT)` : 'SPOT'
+  }
+  if (tc.mode === 'FUT' && !tc.tradingsymbol) return 'FUT unresolved'
+  return 'SPOT (default)'
+})
+const tradeContractUnresolved = computed(() => {
+  const tc = activeTradeContract.value
+  return Boolean(tc && tc.mode === 'FUT' && !tc.tradingsymbol)
+})
 const indicatorCatalog = computed(() => {
   const byName = new Map()
   for (const state of chartStates.value) {
@@ -818,7 +839,7 @@ function syncSelectedOrderBookUsers() {
   const nextTabs = {}
   for (const userId of availableUserIds) {
     const prev = orderBookUserSubTabs.value[userId]
-    nextTabs[userId] = prev === 'net' || prev === 'day' || prev === 'executed' ? prev : 'net'
+    nextTabs[userId] = prev === 'net' || prev === 'day' || prev === 'pending' || prev === 'executed' ? prev : 'net'
   }
   orderBookUserSubTabs.value = nextTabs
 }
@@ -906,6 +927,50 @@ function getUserRecentExecutedOrders(row) {
     .filter((order) => isCompletedOrderStatus(normalizeOrderStatus(order)))
     .slice()
     .sort((a, b) => getOrderEpochMs(b) - getOrderEpochMs(a))
+}
+
+function getUserPendingOrders(row) {
+  const orders = Array.isArray(row?.orders) ? row.orders : []
+  return orders
+    .filter((order) => isPendingOrderStatus(normalizeOrderStatus(order)))
+    .slice()
+    .sort((a, b) => getOrderEpochMs(b) - getOrderEpochMs(a))
+}
+
+function normalizeOrderType(order) {
+  return String(order?.order_type || order?.ordertype || '').trim().toUpperCase()
+}
+
+function getOrderOriginLabel(order) {
+  const explicit = String(order?.origin || order?.source || order?.entry_source || '').trim().toUpperCase()
+  const tag = String(order?.tag || order?.tags || order?.strategy || '').trim().toUpperCase()
+  const merged = `${explicit} ${tag}`.trim()
+
+  if (/(ALGO|AUTO|BOT|SIGNAL|STRATEGY|SYSTEM)/.test(merged)) return 'ALGO'
+  if (/(MANUAL|CUSTOM|USER)/.test(merged)) return 'CUSTOM'
+  return '--'
+}
+
+function getOrderPendingPriceLabel(order) {
+  const type = normalizeOrderType(order)
+  const rawPrice = Number(order?.price)
+  const rawTrigger = Number(order?.trigger_price)
+  const price = Number.isFinite(rawPrice) ? rawPrice : null
+  const trigger = Number.isFinite(rawTrigger) ? rawTrigger : null
+
+  if (type === 'MARKET') return 'MKT'
+  if (type === 'LIMIT') return price === null ? 'LMT' : `LMT ${formatNumber(price)}`
+  if (type === 'SL') {
+    if (price !== null && trigger !== null) return `SL ${formatNumber(price)} / T ${formatNumber(trigger)}`
+    if (price !== null) return `SL ${formatNumber(price)}`
+    if (trigger !== null) return `SL T ${formatNumber(trigger)}`
+    return 'SL'
+  }
+  if (type === 'SL-M' || type === 'SLM') return trigger === null ? 'SL-M' : `SL-M T ${formatNumber(trigger)}`
+  if (price !== null && trigger !== null) return `${formatNumber(price)} / T ${formatNumber(trigger)}`
+  if (price !== null) return formatNumber(price)
+  if (trigger !== null) return `T ${formatNumber(trigger)}`
+  return '--'
 }
 
 function getPositionPnlValue(pos) {
@@ -1173,12 +1238,13 @@ async function fetchChartBundle({ timeframe, start, end, limit }) {
       candles: payload.candles || [],
       indicators: payload.indicators || [],
       signals: payload.signals || [],
+      trade_contract: payload.trade_contract || null,
     }
   } catch (error) {
     // Compatibility fallback for older backend versions.
     const candles = await fetchCandles({ timeframe, start, end, limit })
     const indicators = await fetchIndicatorsForTimeframe({ timeframe, start, end, limit })
-    return { candles, indicators, signals: [] }
+    return { candles, indicators, signals: [], trade_contract: null }
   }
 }
 
@@ -1467,7 +1533,7 @@ function addIndicatorToChart(state, indicator, paneIndex = 2) {
   return created
 }
 
-function computeIndicatorSignature(indicators, signals) {
+function computeIndicatorsSignature(indicators) {
   const indicatorParts = Array.isArray(indicators)
     ? indicators.map((indicator) => {
         const name = normalizeIndicatorName(indicator?.name)
@@ -1480,6 +1546,10 @@ function computeIndicatorSignature(indicators, signals) {
       })
     : []
 
+  return indicatorParts.join('||')
+}
+
+function computeSignalsSignature(signals) {
   const signalParts = Array.isArray(signals)
     ? signals.map((signal) => {
         const ts = normalizeTimestamp(signal?.timestamp ?? signal?.epoch)
@@ -1487,7 +1557,50 @@ function computeIndicatorSignature(indicators, signals) {
       })
     : []
 
-  return `${indicatorParts.join('||')}##${signalParts.join('||')}`
+  return signalParts.join('||')
+}
+
+function getLastCandleTimestamp(state) {
+  if (!state?.candles?.length) return 0
+  return normalizeTimestamp(state.candles[state.candles.length - 1].timestamp) || 0
+}
+
+function buildIndicatorInputKey(state, range) {
+  const lastCandleTs = getLastCandleTimestamp(state)
+  return `${range.start}:${range.end}:${lastCandleTs}:${activeSignalStrategy.value || ''}`
+}
+
+function shouldPollIndicatorsForState(state) {
+  if (!state) return false
+  if (activeSignalStrategy.value) return true
+  const indicators = Array.isArray(state.indicators) ? state.indicators : []
+  return indicators.some((indicator) => isIndicatorEnabled(indicator?.name))
+}
+
+function applyIndicatorBundleToState(state, indicators, signals) {
+  const nextIndicators = Array.isArray(indicators) ? indicators : []
+  const nextSignals = Array.isArray(signals) ? signals : []
+
+  const nextIndicatorSig = computeIndicatorsSignature(nextIndicators)
+  const nextSignalSig = computeSignalsSignature(nextSignals)
+
+  const indicatorsChanged = nextIndicatorSig !== state.indicatorSignature
+  const signalsChanged = nextSignalSig !== state.signalSignature
+
+  if (indicatorsChanged) {
+    state.indicators = nextIndicators
+    ensureIndicatorVisibilityDefaults(state.indicators)
+    renderIndicatorsForState(state)
+    state.indicatorSignature = nextIndicatorSig
+  }
+
+  if (signalsChanged) {
+    state.signals = nextSignals
+    applySignalMarkers(state)
+    state.signalSignature = nextSignalSig
+  }
+
+  return indicatorsChanged || signalsChanged
 }
 
 function ensureIndicatorPane(state) {
@@ -1555,8 +1668,16 @@ function applySignalMarkers(state) {
 
 async function refreshIndicatorsForState(state) {
   if (!state || state.indicatorRefreshing) return
+  if (!shouldPollIndicatorsForState(state)) return
+
   const range = getStateRange(state)
   if (!range) return
+
+  const indicatorInputKey = buildIndicatorInputKey(state, range)
+  const nowMs = Date.now()
+  const recentlyPolled = state.lastIndicatorInputKey === indicatorInputKey
+  const isStale = nowMs - (state.lastIndicatorRefreshAtMs || 0) >= INDICATOR_STALE_REFRESH_MS
+  if (recentlyPolled && !isStale) return
 
   state.indicatorRefreshing = true
   try {
@@ -1568,17 +1689,10 @@ async function refreshIndicatorsForState(state) {
       end: range.end,
       limit: indicatorLimit,
     })
-    const nextIndicators = bundle.indicators || []
-    const nextSignals = bundle.signals || state.signals || []
-    const nextSig = computeIndicatorSignature(nextIndicators, nextSignals)
-    if (nextSig !== state.indicatorSignature) {
-      state.indicators = nextIndicators
-      ensureIndicatorVisibilityDefaults(state.indicators)
-      state.signals = nextSignals
-      renderIndicatorsForState(state)
-      applySignalMarkers(state)
-      state.indicatorSignature = nextSig
-    }
+    if (bundle.trade_contract) activeTradeContract.value = bundle.trade_contract
+    applyIndicatorBundleToState(state, bundle.indicators, bundle.signals ?? state.signals ?? [])
+    state.lastIndicatorInputKey = indicatorInputKey
+    state.lastIndicatorRefreshAtMs = Date.now()
     state.error = ''
   } catch (error) {
     state.error = error.message
@@ -1731,17 +1845,10 @@ async function fetchOlderCandles(state) {
           end: range.end,
           limit: Math.min(Math.max(state.candles.length + 200, 500), 20000),
         })
-        const nextIndicators = bundle.indicators || []
-        const nextSignals = bundle.signals || state.signals || []
-        const nextSig = computeIndicatorSignature(nextIndicators, nextSignals)
-        if (nextSig !== state.indicatorSignature) {
-          state.indicators = nextIndicators
-          ensureIndicatorVisibilityDefaults(state.indicators)
-          state.signals = nextSignals
-          renderIndicatorsForState(state)
-          applySignalMarkers(state)
-          state.indicatorSignature = nextSig
-        }
+        if (bundle.trade_contract) activeTradeContract.value = bundle.trade_contract
+        applyIndicatorBundleToState(state, bundle.indicators, bundle.signals ?? state.signals ?? [])
+        state.lastIndicatorInputKey = buildIndicatorInputKey(state, range)
+        state.lastIndicatorRefreshAtMs = Date.now()
       }
     } else {
       state.noMoreHistory = true
@@ -1774,53 +1881,55 @@ async function refreshRealtimeCandles() {
 
   const results = await Promise.allSettled(
     chartStates.value.map(async (state) => {
-      const tfSec = timeframeSeconds[state.timeframe] || 60
-      const latestTs = anchorLatest
+      try {
+        const tfSec = timeframeSeconds[state.timeframe] || 60
+        const latestTs = anchorLatest
 
-      const lastTs = state.candles.length
-        ? normalizeTimestamp(state.candles[state.candles.length - 1].timestamp)
-        : latestTs - tfSec * HISTORY_PAGE_LIMIT
+        const lastTs = state.candles.length
+          ? normalizeTimestamp(state.candles[state.candles.length - 1].timestamp)
+          : latestTs - tfSec * HISTORY_PAGE_LIMIT
 
-      if (latestTs <= lastTs) {
-        return true
-      }
-
-      const start = Math.max(lastTs - tfSec, latestTs - tfSec * 1000)
-
-      state.isLoadingRange = true
-      state.loadingReason = 'realtime'
-      state.loadingRangeFrom = start
-      state.loadingRangeTo = latestTs
-      state.loadingRangeLabel = formatLoadingRangeLabel(start, latestTs)
-
-      const latest = await fetchCandles({
-        timeframe: state.timeframe,
-        start,
-        end: latestTs,
-        limit: 1000,
-      })
-
-      if (latest.length > 0) {
-        const appliedIncrementally = applyRealtimeCandleUpdates(state, latest)
-        if (!appliedIncrementally) {
-          state.candles = mergeCandles(state.candles, latest)
-          state.mainSeries.setData(toChartData(state.candles))
-          state.volumeSeries.setData(toVolumeData(state.candles))
+        if (latestTs <= lastTs) {
+          return true
         }
-      }
 
-      state.error = ''
-      lastSyncTs.value = Math.floor(Date.now() / 1000)
-      return true
-    }).catch((error) => {
-      state.error = error.message
-      return false
-    }).finally(() => {
-      state.isLoadingRange = false
-      state.loadingReason = null
-      state.loadingRangeFrom = null
-      state.loadingRangeTo = null
-      state.loadingRangeLabel = ''
+        const start = Math.max(lastTs - tfSec, latestTs - tfSec * 1000)
+
+        state.isLoadingRange = true
+        state.loadingReason = 'realtime'
+        state.loadingRangeFrom = start
+        state.loadingRangeTo = latestTs
+        state.loadingRangeLabel = formatLoadingRangeLabel(start, latestTs)
+
+        const latest = await fetchCandles({
+          timeframe: state.timeframe,
+          start,
+          end: latestTs,
+          limit: 1000,
+        })
+
+        if (latest.length > 0) {
+          const appliedIncrementally = applyRealtimeCandleUpdates(state, latest)
+          if (!appliedIncrementally) {
+            state.candles = mergeCandles(state.candles, latest)
+            state.mainSeries.setData(toChartData(state.candles))
+            state.volumeSeries.setData(toVolumeData(state.candles))
+          }
+        }
+
+        state.error = ''
+        lastSyncTs.value = Math.floor(Date.now() / 1000)
+        return true
+      } catch (error) {
+        state.error = error?.message || String(error)
+        return false
+      } finally {
+        state.isLoadingRange = false
+        state.loadingReason = null
+        state.loadingRangeFrom = null
+        state.loadingRangeTo = null
+        state.loadingRangeLabel = ''
+      }
     }),
   )
 
@@ -1835,7 +1944,9 @@ async function refreshRealtimeCandles() {
 
 async function refreshIndicators() {
   if (isReloading.value) return
-  await Promise.allSettled(chartStates.value.map((state) => refreshIndicatorsForState(state)))
+  const statesNeedingPoll = chartStates.value.filter((state) => shouldPollIndicatorsForState(state))
+  if (statesNeedingPoll.length === 0) return
+  await Promise.allSettled(statesNeedingPoll.map((state) => refreshIndicatorsForState(state)))
 }
 
 async function loadDataAndRenderMulti() {
@@ -1890,10 +2001,14 @@ async function loadDataAndRenderMulti() {
         end: normalizedEnd,
         limit: HISTORY_PAGE_LIMIT,
       })
+      if (bundle.trade_contract) activeTradeContract.value = bundle.trade_contract
       const candles = bundle.candles || []
       const indicators = bundle.indicators || []
       const signals = bundle.signals || []
-      const indicatorSignature = computeIndicatorSignature(indicators, signals)
+      const indicatorSignature = computeIndicatorsSignature(indicators)
+      const signalSignature = computeSignalsSignature(signals)
+      const initialLastCandleTs = candles.length ? normalizeTimestamp(candles[candles.length - 1].timestamp) || 0 : 0
+      const initialIndicatorInputKey = `${normalizedStart}:${normalizedEnd}:${initialLastCandleTs}:${activeSignalStrategy.value || ''}`
 
       nextStates.push({
         timeframe,
@@ -1901,6 +2016,9 @@ async function loadDataAndRenderMulti() {
         indicators,
         signals,
         indicatorSignature,
+        signalSignature,
+        lastIndicatorInputKey: initialIndicatorInputKey,
+        lastIndicatorRefreshAtMs: Date.now(),
         chart: null,
         mainSeries: null,
         signalMarkers: null,
@@ -2123,6 +2241,7 @@ function toggleTimeframe(value) {
 
 function selectInstrument(value) {
   selectedUniverseInstrument.value = null
+  activeTradeContract.value = null
   instrumentToken.value = value
 }
 
@@ -2300,6 +2419,10 @@ watch(availableSignalOutcomeDays, (days) => {
         <div class="header-left">
           <h2>{{ activeInstrument.symbol }} Engine View</h2>
           <p>{{ activeInstrument.label }} · {{ selectedTimeframes.join(' / ') }} · IST</p>
+          <p class="trade-contract-line" :class="{ bad: tradeContractUnresolved }">
+            Will Trade: {{ tradeContractLabel }}
+            <span v-if="tradeContractUnresolved"> · FUT mapping unresolved, fallback to spot</span>
+          </p>
         </div>
         <div class="header-right">
           <button class="sync-chip" @click="manualRefresh">{{ isReloading ? 'Syncing...' : 'Sync Now' }}</button>
@@ -2448,7 +2571,7 @@ watch(availableSignalOutcomeDays, (days) => {
         <button class="close-btn" @click="isControlDrawerOpen = false">Close</button>
       </div>
 
-      <div class="drawer-section">
+      <div class="drawer-section insight-section insight-section-snapshot">
         <label class="field-label">Instrument</label>
         <div class="watchlist-pills">
           <button
@@ -2464,7 +2587,7 @@ watch(availableSignalOutcomeDays, (days) => {
         </div>
       </div>
 
-      <div class="drawer-section">
+      <div class="drawer-section insight-section insight-section-signal">
         <label class="field-label">Timeframes (max 4)</label>
         <div class="timeframe-pills">
           <button
@@ -2724,10 +2847,16 @@ watch(availableSignalOutcomeDays, (days) => {
         </div>
       </div>
 
-      <div class="drawer-section">
+      <div class="drawer-section insight-section insight-section-snapshot">
         <div class="rail-card">
-          <h2>Per-Frame Snapshot</h2>
-          <div v-if="summaryCards.length === 0" class="empty-state">No chart summary available.</div>
+          <div class="card-head-inline">
+            <h2>Per-Frame Snapshot</h2>
+            <button class="ghost-btn tiny" @click="showInsightSnapshot = !showInsightSnapshot">
+              {{ showInsightSnapshot ? 'Hide' : 'Show' }}
+            </button>
+          </div>
+          <div v-if="!showInsightSnapshot" class="empty-state">Collapsed in trade ops mode.</div>
+          <div v-else-if="summaryCards.length === 0" class="empty-state">No chart summary available.</div>
           <div v-else class="summary-list">
             <article v-for="card in summaryCards" :key="card.timeframe" class="summary-item">
               <div class="summary-tape">
@@ -2745,9 +2874,16 @@ watch(availableSignalOutcomeDays, (days) => {
         </div>
       </div>
 
-      <div class="drawer-section">
+      <div class="drawer-section insight-section insight-section-signal">
         <div class="rail-card">
-          <h2>Signal Timeline</h2>
+          <div class="card-head-inline">
+            <h2>Signal Timeline</h2>
+            <button class="ghost-btn tiny" @click="showInsightSignals = !showInsightSignals">
+              {{ showInsightSignals ? 'Hide' : 'Show' }}
+            </button>
+          </div>
+          <div v-if="!showInsightSignals" class="empty-state">Collapsed in trade ops mode.</div>
+          <template v-else>
           <div class="signal-toolbar">
             <label class="cell-sub">Active</label>
             <select class="drawer-input signal-select" v-model="activeSignalStrategy">
@@ -2825,13 +2961,13 @@ watch(availableSignalOutcomeDays, (days) => {
               </article>
             </div>
           </div>
+          </template>
         </div>
       </div>
 
-      <div class="drawer-section">
+      <div class="drawer-section insight-section insight-section-orderbook">
         <div class="rail-card">
           <h2>Order Book</h2>
-          <p class="rail-caption">Broker sync + future local/pending overlay support.</p>
           <p v-if="orderBookError" class="universe-error">{{ orderBookError }}</p>
 
           <div class="orderbook-topbar">
@@ -2915,6 +3051,7 @@ watch(availableSignalOutcomeDays, (days) => {
                 <div class="order-metrics">
                   <span class="footer-item mono">net {{ getUserNetPositions(row).length }}</span>
                   <span class="footer-item mono">day {{ getUserDayPositions(row).length }}</span>
+                  <span class="footer-item mono">pending {{ getUserPendingOrders(row).length }}</span>
                   <span class="footer-item mono">executed {{ getUserRecentExecutedOrders(row).length }}</span>
                   <span class="footer-item mono">net_qty {{ formatNumber(getUserPanelTotals(row).netQty) }}</span>
                   <span class="footer-item mono">w {{ getUserPanelTotals(row).winners }}</span>
@@ -2942,6 +3079,13 @@ watch(availableSignalOutcomeDays, (days) => {
                   @click="setOrderBookUserSubTab(row.user_id, 'day')"
                 >
                   Day Positions
+                </button>
+                <button
+                  class="tab-btn"
+                  :class="{ active: getOrderBookUserSubTab(row.user_id) === 'pending' }"
+                  @click="setOrderBookUserSubTab(row.user_id, 'pending')"
+                >
+                  Pending / Live
                 </button>
                 <button
                   class="tab-btn"
@@ -2997,6 +3141,43 @@ watch(availableSignalOutcomeDays, (days) => {
                     </tr>
                     <tr v-if="!orderBookLoading && getUserDayPositions(row).length === 0">
                       <td colspan="5" class="empty-row">No day positions.</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <table class="mini-table" v-else-if="getOrderBookUserSubTab(row.user_id) === 'pending'">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Order</th>
+                      <th>Symbol</th>
+                      <th>Side</th>
+                      <th>Type</th>
+                      <th>Origin</th>
+                      <th>Price</th>
+                      <th>Qty</th>
+                      <th>Filled</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(order, idx) in getUserPendingOrders(row).slice(0, 100)"
+                      :key="`u-pending-${row.user_id}-${idx}`"
+                    >
+                      <td>{{ formatOrderTime(order) }}</td>
+                      <td class="mono">{{ order.order_id || order.id || '--' }}</td>
+                      <td class="order-symbol">{{ order.tradingsymbol || order.symbol || '--' }}</td>
+                      <td>{{ order.transaction_type || order.side || '--' }}</td>
+                      <td>{{ normalizeOrderType(order) || '--' }}</td>
+                      <td>{{ getOrderOriginLabel(order) }}</td>
+                      <td>{{ getOrderPendingPriceLabel(order) }}</td>
+                      <td>{{ order.quantity ?? order.qty ?? '--' }}</td>
+                      <td>{{ order.filled_quantity ?? order.filled_qty ?? 0 }}</td>
+                      <td>{{ order.status || '--' }}</td>
+                    </tr>
+                    <tr v-if="!orderBookLoading && getUserPendingOrders(row).length === 0">
+                      <td colspan="10" class="empty-row">No pending/live orders.</td>
                     </tr>
                   </tbody>
                 </table>
@@ -3120,6 +3301,14 @@ watch(availableSignalOutcomeDays, (days) => {
   margin: 4px 0 0;
   font-size: 0.66rem;
   color: #90a7c8;
+}
+
+.trade-contract-line {
+  color: #9ddfc5;
+}
+
+.trade-contract-line.bad {
+  color: #fecaca;
 }
 
 .header-right {
@@ -3910,6 +4099,25 @@ button {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.card-head-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.insight-section-orderbook {
+  order: 1;
+}
+
+.insight-section-signal {
+  order: 2;
+}
+
+.insight-section-snapshot {
+  order: 3;
 }
 
 .universe-card {

@@ -1,6 +1,6 @@
 services:
   redis:
-    image: redis/redis-stack-server:latest
+    image: docker.io/redis/redis-stack-server:latest
     restart: always
     expose:
       - 6379
@@ -10,13 +10,13 @@ services:
       - REDIS_ARGS=--appendonly yes --appendfsync everysec --protected-mode no
     # command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--protected-mode" , "no"]
   redis-insight:
-    image: redis/redisinsight:latest
+    image: docker.io/redis/redisinsight:latest
     restart: always
     volumes:
       - redis-insight:/data
 
   candle-sync:
-    image: ngat-runtime:latest
+    # image: ngat-runtime:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.runtime
@@ -45,7 +45,7 @@ services:
       - RAY_memory_monitor_refresh_ms=0
 
   indicator-sync:
-    image: ngat-runtime:latest
+    # image: ngat-runtime:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.runtime
@@ -70,11 +70,12 @@ services:
       - RAY_OBJECT_STORE_MEMORY_BYTES=134217728
       - RAY_memory_usage_threshold=0.99
       - RAY_memory_monitor_refresh_ms=0
-      - INDICATOR_SKIP_HISTORICAL_IF_PRESENT=0
-      - INDICATOR_SYNC_VERBOSE=0
+      - INDICATOR_SKIP_HISTORICAL_IF_PRESENT=1
+      - INDICATOR_HISTORICAL_LOOKBACK_BARS=2000
+      - INDICATOR_SYNC_VERBOSE=1
 
   order-sync:
-    image: ngat-runtime:latest
+    # image: ngat-runtime:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.runtime
@@ -91,7 +92,7 @@ services:
       - TOKEN_CACHE_FILE=/cache/keystore.json
 
   auto-execution:
-    image: ngat-runtime:latest
+    # image: ngat-runtime:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.runtime
@@ -120,15 +121,15 @@ services:
       - TOKEN_CACHE_FILE=/cache/keystore.json
 
   backend:
-    image: ngat-runtime:latest
+    # image: ngat-runtime:latest
     build:
       context: .
       dockerfile: docker/Dockerfile.runtime
     container_name: backend
     working_dir: /app/tradingview_dashboard/backend
     command: uvicorn main:app --host 0.0.0.0 --port 8000
-    expose:
-      - 8000
+    ports:
+      - 8000:8000
     depends_on:
       - redis
     environment:
@@ -137,15 +138,15 @@ services:
       - REDIS_URL=redis://redis:6379
       - INDICATORS_PRECOMPUTED_ONLY=1
 
-  nginx:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.nginx
-    container_name: nginx
-    depends_on:
-      - backend
-    ports:
-      - "${NGINX_PORT:-80}:80"
+  # nginx:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.nginx
+  #   container_name: nginx
+  #   depends_on:
+  #     - backend
+  #   ports:
+  #     - "${NGINX_PORT:-80}:80"
 
 volumes:
   redis-insight:

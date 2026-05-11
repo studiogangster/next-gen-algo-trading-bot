@@ -54,6 +54,10 @@ strategies:
       cooldown_bars: 2
       reset_on_new_day: true
       emit_day_end_exit: true
+      trade_target:
+        instrument: "FUT"
+        future_preference: "next"
+        exchange: "NFO"
       indicators:
         - id: "rsi"
           type: "rsi"
