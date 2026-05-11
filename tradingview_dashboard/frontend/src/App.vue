@@ -2406,7 +2406,13 @@ watch(availableSignalOutcomeDays, (days) => {
 </script>
 
 <template>
-  <div class="terminal-root">
+  <div
+    class="terminal-root"
+    :class="{
+      'with-insight-pane': isInsightDrawerOpen,
+      'with-insight-pane-wide': isInsightDrawerOpen && isInsightDrawerWide,
+    }"
+  >
     <section class="engine-shell">
       <button class="edge-toggle edge-toggle-left" :class="{ active: isControlDrawerOpen }" @click="toggleControlDrawer">
         {{ isControlDrawerOpen ? 'Hide Controls' : 'Show Controls' }}
@@ -2563,7 +2569,7 @@ watch(availableSignalOutcomeDays, (days) => {
       {{ uiError }}
     </div>
 
-    <div v-if="isControlDrawerOpen || isInsightDrawerOpen" class="drawer-backdrop" @click="closeDrawers"></div>
+    <div v-if="isControlDrawerOpen" class="drawer-backdrop" @click="closeDrawers"></div>
 
     <aside class="drawer drawer-left" :class="{ open: isControlDrawerOpen }">
       <div class="drawer-head">
@@ -3222,6 +3228,7 @@ watch(availableSignalOutcomeDays, (days) => {
 
 <style scoped>
 .terminal-root {
+  position: relative;
   height: 100vh;
   min-height: 100vh;
   padding: 8px;
@@ -3235,6 +3242,15 @@ watch(availableSignalOutcomeDays, (days) => {
     radial-gradient(circle at 92% 0%, rgba(59, 130, 246, 0.18), transparent 40%),
     linear-gradient(145deg, #030711 0%, #071223 40%, #090f1d 100%);
   font-family: 'IBM Plex Sans', 'Segoe UI', Tahoma, sans-serif;
+  transition: padding-right 0.25s ease;
+}
+
+.terminal-root.with-insight-pane {
+  padding-right: min(330px, 92vw);
+}
+
+.terminal-root.with-insight-pane.with-insight-pane-wide {
+  padding-right: min(620px, 96vw);
 }
 
 .engine-shell {
@@ -4058,7 +4074,10 @@ button {
 }
 
 .drawer-right {
-  right: 0;
+  right: 8px;
+  top: 8px;
+  bottom: 8px;
+  border-radius: 10px;
   transform: translateX(102%);
 }
 
@@ -4512,6 +4531,18 @@ button {
 @media (max-width: 1080px) {
   .terminal-root {
     padding: 6px;
+  }
+
+  .terminal-root.with-insight-pane,
+  .terminal-root.with-insight-pane.with-insight-pane-wide {
+    padding-right: 6px;
+  }
+
+  .drawer-right {
+    right: 0;
+    top: 0;
+    bottom: 0;
+    border-radius: 0;
   }
 
   .stage-header {
